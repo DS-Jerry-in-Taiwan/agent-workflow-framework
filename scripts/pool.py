@@ -29,19 +29,6 @@ Schema follows v1.0 Task Pool spec with safe defaults:
     - validate_history: []
     - depends_on: []
     - blocked_by: []
-
-Data contract — item dict fields consumed by observability_report.py:
-    - status, id: index loop, status counts
-    - execution_contract.recommended_layer: layer counts (primary)
-    - execution_contract.risk_level: risk counts
-    - classifier_result.final_layer: layer counts (fallback)
-    - lane_decision.lane: lane counts
-    - lane_decision.l4_mandatory_delegation: governance signals
-    - lane_decision.hitl_required/qa_required/hitl_mode: governance signals
-    - lane_decision.escalation_triggered: escalated state
-    - retry_count, max_retry, validate_history: retry/validation summary
-    - is_pilot, artifact_type: pilot counts
-    When adding any new field to the item schema, update observability_report.py accordingly.
 """
 
 import argparse
