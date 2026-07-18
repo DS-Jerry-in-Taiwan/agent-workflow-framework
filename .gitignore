@@ -23,3 +23,15 @@ Thumbs.db
 
 # Project specific
 config/*.local.json
+
+# OpenCode secrets
+opencode.json
+.opencode/opencode.json
+
+# OpenCode runtime
+.opencode/node_modules/
+.opencode-runtime/
+
+# Local Python cache in runtime tooling
+scripts/__pycache__/
+tests/__pycache__/
