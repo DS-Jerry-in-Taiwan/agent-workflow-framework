@@ -384,6 +384,209 @@ class TestEnsurePoolDirs(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Tests — cmd_list()
+# ---------------------------------------------------------------------------
+
+class TestCmdList(unittest.TestCase):
+    """cmd_list() lists pool items, optionally filtered by status."""
+
+    def _make_list_args(self, status=None):
+        return Namespace(status=status)
+
+    def test_list_empty_pool(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                args = self._make_list_args()
+                pool.cmd_list(args)
+
+    def test_list_with_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(
+                    title="Task A", layer="L2_bug_fix", priority=2
+                ))
+                pool.cmd_add(_make_args(
+                    title="Task B", layer="L1_feature_dev", priority=1
+                ))
+                idx = pool.load_pool_index()
+                self.assertEqual(len(idx["items"]), 2)
+
+    def test_list_filter_by_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(title="Task A", layer="L2_bug_fix"))
+                args = self._make_list_args(status="completed")
+                pool.cmd_list(args)
+
+
+# ---------------------------------------------------------------------------
+# Tests — cmd_pick()
+# ---------------------------------------------------------------------------
+
+class TestCmdPick(unittest.TestCase):
+    """cmd_pick() picks next available pending task."""
+
+    def test_pick_next_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(
+                    title="Task A", layer="L2_bug_fix", priority=1
+                ))
+                pool.cmd_pick(None)
+                idx = pool.load_pool_index()
+                self.assertEqual(idx["items"][0]["status"], pool.STATUS_PICKED)
+
+    def test_pick_empty_pool(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_pick(None)
+
+    def test_pick_respects_priority(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(
+                    title="Low priority", layer="L2_bug_fix", priority=10
+                ))
+                pool.cmd_add(_make_args(
+                    title="High priority", layer="L1_feature_dev", priority=1
+                ))
+                pool.cmd_pick(None)
+                idx = pool.load_pool_index()
+                picked = [i for i in idx["items"] if i["status"] == pool.STATUS_PICKED]
+                self.assertEqual(len(picked), 1, "Expected exactly one picked item")
+                self.assertEqual(picked[0]["title"], "High priority",
+                                 "Higher-priority item should be picked first")
+
+
+# ---------------------------------------------------------------------------
+# Tests — cmd_complete()
+# ---------------------------------------------------------------------------
+
+class TestCmdComplete(unittest.TestCase):
+    """cmd_complete() marks a task as completed."""
+
+    def _make_complete_args(self, task_id):
+        return Namespace(task_id=task_id)
+
+    def test_complete_picked_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(
+                    title="Task A", layer="L2_bug_fix", priority=1
+                ))
+                pool.cmd_pick(None)
+                idx = pool.load_pool_index()
+                item_id = idx["items"][0]["id"]
+                args = self._make_complete_args(item_id)
+                pool.cmd_complete(args)
+                idx2 = pool.load_pool_index()
+                self.assertEqual(idx2["items"][0]["status"], pool.STATUS_COMPLETED)
+
+    def test_complete_invalid_status_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(
+                    title="Task A", layer="L2_bug_fix", priority=1
+                ))
+                idx = pool.load_pool_index()
+                item_id = idx["items"][0]["id"]
+                args = self._make_complete_args(item_id)
+                with self.assertRaises(SystemExit):
+                    pool.cmd_complete(args)
+
+    def test_complete_missing_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                args = self._make_complete_args("pool-nonexistent-999")
+                with self.assertRaises(SystemExit):
+                    pool.cmd_complete(args)
+
+
+# ---------------------------------------------------------------------------
+# Tests — cmd_status()
+# ---------------------------------------------------------------------------
+
+class TestCmdStatus(unittest.TestCase):
+    """cmd_status() shows task details."""
+
+    def _make_status_args(self, task_id):
+        return Namespace(task_id=task_id)
+
+    def test_status_existing_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                pool.cmd_add(_make_args(
+                    title="Task A", layer="L2_bug_fix", priority=1
+                ))
+                idx = pool.load_pool_index()
+                item_id = idx["items"][0]["id"]
+                args = self._make_status_args(item_id)
+                pool.cmd_status(args)
+
+    def test_status_missing_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.ensure_pool_dirs()
+                pool.cmd_init()
+                args = self._make_status_args("pool-nonexistent-999")
+                with self.assertRaises(SystemExit):
+                    pool.cmd_status(args)
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
