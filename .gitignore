@@ -35,3 +35,6 @@ opencode.json
 # Local Python cache in runtime tooling
 scripts/__pycache__/
 tests/__pycache__/
+
+# Documentation (full directory; canonical routing docs are already committed)
+docs/
