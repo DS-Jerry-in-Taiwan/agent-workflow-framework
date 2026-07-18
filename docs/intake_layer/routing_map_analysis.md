@@ -133,6 +133,54 @@ Confidence < 0.55: 問清楚「這是 config/feature/bug fix/refactor/release？
 跨層匹配: 以最高風險層為主（L4 > L3 > L2 > L1 > L0）
 ```
 
+---
+
+## Phase 0 / Lane Selector / Task Pool Extension
+
+`routing_map_v1.json` 仍是 L0-L4 canonical source of truth；以下 extension 不改變 L0-L4 keywords、confidence formula、thresholds、cross-layer dominance 或 L4 mandatory delegation。
+
+### Phase 0 Clarifier
+
+當原始需求模糊、缺 success criteria、缺 validation plan，或 `confidence < 0.55` 的淺層澄清不足時，先進入 Phase 0 Clarifier，產出 Execution Contract 後再回到 Intake。
+
+Execution Contract 8 欄位：
+
+| 欄位 | 用途 |
+|---|---|
+| `clarified_spec` | Intake / Architect 接手的明確需求 |
+| `scope_boundary` | in-scope / out-of-scope 防止 scope creep |
+| `success_criteria` | 驗收標準 |
+| `validation_plan` | QA / 測試策略 |
+| `risk_level` | HITL 深度 |
+| `recommended_layer` | Clarifier hint；不是 final routing decision |
+| `next_step` | 下一步建議 |
+| `residual_ambiguity` | 若非空，阻止自動 handoff |
+
+### Lane Selector（v0.4）
+
+Lane Selector 消費 final L0-L4 result，不重新分類：
+
+| Layer | Lane decision | Guardrail |
+|---|---|---|
+| L0 | Fast Track / Escalated | prod / release-adjacent / runtime / new tests 必須 escalation |
+| L1 | Standard | Developer → QA → Architect 抽審 |
+| L2 | Quick Fix / Investigate | Quick Fix 不跳過 QA；Investigate 保留 Debugger |
+| L3 | High Risk | Human pre-approval |
+| L4 | Releaser | `agent-releaser` mandatory；Architect 不得執行 release ops |
+
+### Task Pool + Auto Pilot（v1.0）
+
+Task Pool 是 file-based queue，保存 `execution_contract`、`classifier_result`、`lane_decision`、`retry_count`、`validate_history`、`hitl_state`、dependency / lock / audit fields。
+
+Auto Pilot 邊界：
+
+- L0 safe Fast Track 可產生 diff report / audit log。
+- L1/L2/L3 必須保留 QA / HITL。
+- L4 必須 Releaser + Human HITL；auto-release paths = 0。
+- Validate Gate retry limit 保持 3，`retry_count >= 3` 升級給 User。
+
+> **⚠️ Pool Artifact Boundary**: Pool items in `docs/agent_context/pool/` are **local generated runtime state**, not canonical routing specs. They must not be confused with `routing_map_v1.json` or the intake/architecture docs. Pool artifacts are subject to local file operations (`pool.py`) and are not part of the canonical routing rules.
+
 ## 對應的測試覆蓋範圍
 
 | Layer | 類型 | CI 執行 | 手動執行 |

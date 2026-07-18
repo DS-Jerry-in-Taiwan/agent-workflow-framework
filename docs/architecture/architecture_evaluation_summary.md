@@ -18,6 +18,7 @@ Agent Workflow Framework — 架構評估與總結
 3. **品質閘門** — 開發完成後怎麼驗證？反饋迴圈怎麼跑？
 4. **風險分級與 HITL** — 什麼情況需要 Human 介入？介入多深？
 5. **發布治理** — 誰能執行 release？流程是什麼？
+6. **跨 session 任務延續** — clarified tasks 如何排隊、恢復、避免遺失 context？
 
 ### 1.2 設計目標
 
@@ -36,51 +37,44 @@ Agent Workflow Framework — 架構評估與總結
 ### 2.1 流程圖
 
 ```
-User Request (自然語言)
+User Request (自然語言 / fuzzy idea)
        │
        ▼
 ┌──────────────────────────────────────┐
-│          Intake Layer                │
-│  (預選擇層：分類 + 信心評分)          │
-│                                      │
-│  L0 配置&雜務  L1 功能開發            │
-│  L2 除錯修復  L3 重構架構            │
-│  L4 發布部署                         │
+│ Phase 0 Clarifier                    │
+│ thinking_log + Execution Contract     │
 └─────────────┬────────────────────────┘
-               │
-               ▼
+              │
+              ▼
 ┌──────────────────────────────────────┐
-│          Router                      │
-│  (路由決策：direct/guarded/ask)       │
-│                                      │
-│  confidence ≥0.85 → direct           │
-│  confidence ≥0.55 → guarded          │
-│  confidence <0.55 → ask clarification│
+│ Intake Layer + Router                │
+│ L0-L4 keyword routing + confidence    │
+│ formula / thresholds / dominance      │
 └─────────────┬────────────────────────┘
-               │
-               ▼
+              │
+              ▼
 ┌──────────────────────────────────────┐
-│       Validate Gate (品質閘門)        │
-│                                      │
-│  Architect規劃 → Developer實作       │
-│  → QA驗證 → retry ≤3 → HITL審查     │
+│ Lane Selector                         │
+│ L0 Fast Track / L2 QuickFix/INV       │
+│ L3 HIGH / L4 Releaser guard           │
 └─────────────┬────────────────────────┘
-               │
-               ▼
+              │
+              ▼
 ┌──────────────────────────────────────┐
-│       HITL Gate (人機協作閘門)        │
-│                                      │
-│  🟢 LOW auto-approve                 │
-│  🟡 MEDIUM 抽審 Validate Report      │
-│  🔴 HIGH Pre-approval 逐條審查       │
+│ Task Pool + Auto Pilot                │
+│ queue / resume / audit / guarded auto │
 └─────────────┬────────────────────────┘
-               │
-               ▼
+              │
+              ▼
 ┌──────────────────────────────────────┐
-│     Release Governance (發布治理)     │
-│                                      │
-│  4 guards + Releaser 強制委派        │
-│  (Architect 不得執行)                │
+│ Validate Gate + HITL                  │
+│ Developer → QA → retry ≤3 → HITL      │
+└─────────────┬────────────────────────┘
+              │
+              ▼
+┌──────────────────────────────────────┐
+│ Release Governance                    │
+│ 4 guards + Releaser mandatory         │
 └──────────────────────────────────────┘
 ```
 
@@ -89,10 +83,12 @@ User Request (自然語言)
 | Agent | 職責 | 啟動方式 | 禁止事項 |
 |:------|:------|:---------|:---------|
 | **Architect** | 架構規劃、任務協調、風險評估 | 預設 agent | 執行 release/git push 到 main |
+| **Clarifier** | Phase 0 需求澄清、thinking_log、Execution Contract | Architect preprocessing mode | 直接實作、取代 Router final decision |
 | **Developer** | 功能實作、測試撰寫 | `task(agent-developer)` | 自行定義不規範的架構 |
 | **QA** | Validate Gate 驗證 | `task(agent-qa)` | 修改實作程式碼 |
 | **Debugger** | 根因分析、問題定位 | `task(agent-debugger)` | 跳過 Hypothesis loop |
 | **Releaser** | 發布部署、CI/CD 監控 | `task(agent-releaser)` | 無 Human 批准前執行 |
+| **Task Pool / Auto Pilot** | 跨 session queue、resume、audit、guarded auto policy | Spec-time policy / future runtime | L4 auto-release、跳過 Validate Gate |
 
 ### 2.3 協作流程（三階段）
 
@@ -218,6 +214,14 @@ ratio_component  = top_score / total_keywords_in_layer
 - `ratio_component` (權重 0.35) — 衡量匹配的密度。匹配數佔該層 keywords 比例越高，信心越高。
 - 權重傾斜 margin，因為區辨力比匹配數量更能反映分類正確性。
 
+### 4.2.1 Phase 0 Execution Contract handoff
+
+若 request 模糊或 `confidence < 0.55` 且淺層澄清不足，先由 Phase 0 Clarifier 產出 Execution Contract，再回到 Intake。
+
+`recommended_layer` 是 hint，不是 final decision。Final routing 仍遵守 `routing_map_v1.json` 的 formula / thresholds / dominance。
+
+> **Governance Audit Note**: Phase 0, Lane Selector, and Task Pool extensions are workflow extensions around the canonical router. Governance audit verifies that these extensions do not modify canonical routing invariants: confidence formula, thresholds, cross-layer dominance order, L4 mandatory delegation, or Validate Gate semantics. Generated pool artifacts in `docs/agent_context/pool/` are local runtime state and are not canonical routing specs.
+
 ### 4.3 路由閾值
 
 | 信心值 | 模式 | 行為 |
@@ -271,6 +275,22 @@ Developer 實作 → QA Validate
 ```
 
 **Validate Report 內容**: QA 產出，包含具體問題位置與修正建議。
+
+---
+
+## 5.4 Lane Selector 與 Task Pool
+
+Lane Selector 不重新分類 L0-L4，只根據 `classifier_result.final_layer` 和 Execution Contract 決定 execution lane：
+
+| Layer | Lane | Guardrail |
+|---|---|---|
+| L0 | Fast Track / Escalated | prod/release-adjacent/runtime/new tests 必須 escalation |
+| L1 | Standard | Developer → QA → Architect review |
+| L2 | Quick Fix / Investigate | Quick Fix 不跳過 QA；Investigate 保留 Debugger |
+| L3 | High Risk | Human pre-approval |
+| L4 | Releaser | `agent-releaser` mandatory；auto-release path = 0 |
+
+Task Pool + Auto Pilot 保存 clarified tasks 的 queue state、retry_count、validate_history、HITL state、dependency/lock/audit fields。Auto Pilot 僅在 safe L0 lane 產生 diff report / audit log；L1/L2/L3/L4 不可繞過 Validate Gate / HITL。
 
 ---
 
@@ -417,7 +437,9 @@ ML 方案（分類器）需要 labeled dataset，這在專案初期不存在。M
 
 ---
 
-## 11. 未來發展 (V2 方向)
+## 11. 長程規劃（Future backlog）
+
+> 注意：本節是 Phase v2.0 之後的長程 backlog，不是 Phase v2.0 Graphify Optional Enhancement。Phase v2.0 僅規劃 Graphify 作為 optional context enrichment；以下項目需另開 phase 才能實作。
 
 - [ ] **中文 keywords 支援** — keywords 擴充中英文並列
 - [ ] **自動分類腳本** — `src/intake/classifier.py`，可執行 confidence 計算

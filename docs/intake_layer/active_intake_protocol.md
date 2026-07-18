@@ -11,6 +11,13 @@ User request (原始自然語言)
        │
        ▼
   ┌─────────────────────────────────────┐
+  │  Step 0: Phase 0 Clarifier          │
+  │  若需求模糊 / 缺 completion 標準，   │
+  │  先產出 Execution Contract           │
+  └─────────────────────────────────────┘
+       │
+       ▼
+  ┌─────────────────────────────────────┐
   │  Step 1: Keyword Detection          │
   │  掃描 keywords，算每個 layer 的匹配  │
   │  分數                                 │
@@ -28,7 +35,7 @@ User request (原始自然語言)
   │  Step 3: Routing Decision           │
   │  ≥0.85 → direct (name the agent)    │
   │  ≥0.55 → guarded (name + explore)   │
-  │  <0.55 → ask clarifying question    │
+  │  <0.55 → clarify / Phase 0 fallback │
   └─────────────────────────────────────┘
        │
        ▼
@@ -43,13 +50,55 @@ User request (原始自然語言)
   │  Step 5: Layer-Specific Workflow    │
   │  (見下方各層細部流程)                │
   └─────────────────────────────────────┘
+       │
+       ▼
+  ┌─────────────────────────────────────┐
+  │  Step 6: Lane Selector + Task Pool  │
+  │  v0.4 lane decision → v1.0 pool     │
+  │  Auto Pilot 僅在 guardrails 內運作  │
+  └─────────────────────────────────────┘
 ```
+
+---
+
+## Step 0 — Phase 0 Clarifier（需求澄清入口）
+
+當原始需求不具備足夠開發條件時，先進入 Phase 0 Clarifier，再回到 Intake。
+
+**觸發條件**：
+- 使用者需求模糊，無明確 scope / success criteria / validation method。
+- `confidence < 0.55` 且淺層分類問題不足以釐清。
+- 任務描述包含多種可能路徑，需要先定義不做什麼。
+- 需要跨 session resume 的 thinking context。
+
+**Phase 0 產出**：
+
+```yaml
+thinking_log: docs/agent_context/thinking/{topic}_thinking.md
+execution_contract:
+  clarified_spec: string
+  scope_boundary:
+    in_scope: list[string]
+    out_of_scope: list[string]
+  success_criteria: list[string]
+  validation_plan: list[string]
+  risk_level: LOW | MEDIUM | HIGH
+  recommended_layer: L0 | L1 | L2 | L3 | L4   # hint only
+  next_step: string
+  residual_ambiguity: list[string]
+```
+
+`recommended_layer` 只是 Clarifier hint，final routing 仍由 Intake / Router 根據 canonical rules 決定。
 
 ---
 
 ## Step 1 — Keyword Detection
 
 對使用者輸入掃描 `routing_map_v1.json` 中每個 layer 定義的 keywords。
+
+> **注意**：`routing_map_v1.json` 仍是 L0-L4 canonical source of truth。Phase 0 Clarifier、Lane Selector、Task Pool / Auto Pilot 是 Intake 前後的 workflow extension，不取代 routing JSON 的公式、thresholds、dominance order 或 L4 governance。
+
+**L0/L1 boundary note**: Certain inputs containing both L0 keywords (e.g., `docs`, `config`) and L1 keywords (e.g., `new`, `add`) may route to L1. This is by design: ambiguous docs/config wording defaults to the higher-risk workflow instead of L0 auto-approval. For docs-only tasks that happen to contain feature-like words, Human may override through Phase 0 Clarifier or explicit Architect instruction. This note does **not** modify `routing_map_v1.json` keywords or dominance order.
 
 **計分方式**:
 - 每個 layer 獨立計算匹配分數
@@ -97,6 +146,8 @@ ratio_component  = top_score / total_keywords_in_layer
 > - 重構架構（L3）
 > - 發布上線（L4）」
 
+若上述淺層問題仍不足以產生完整 Execution Contract，則升級到 **Step 0 Phase 0 Clarifier**，以 one-question-at-a-time 方式補齊 contract 後再回到 Intake。
+
 ---
 
 ## Step 4 — Cross-Layer Dominance
@@ -111,6 +162,8 @@ L1 功能開發 (🟡 MEDIUM)  → 壓制 L0
 L0 配置&雜務 (🟢 LOW)    → 無壓制能力
 ```
 
+> **Note on `dominance_applied` flag**: Runtime classifier output keeps `dominance_applied` as a boolean diagnostic field. The canonical decision remains the highest-risk matched layer according to `DOMINANCE_ORDER`; diagnostic wording must not be treated as a separate routing source of truth.
+
 ---
 
 ## Step 5 — Layer-Specific Workflow
@@ -122,11 +175,11 @@ Route to: developer (輕量變更) / architect (需審查)
 HITL: 🟢 LOW
 
 工作流:
-1. Developer 讀取受影響的配置檔（config/*.json / release.json 等）
-2. 執行變更
-3. 跑既有測試確認沒壞
-4. 報告變更摘要
-5. 若涉及 prod config → Human 確認後再合併
+1. Lane Selector 檢查是否符合 L0 Fast Track eligibility
+2. Safe L0 → Developer 產出 diff report + audit log（不需要 QA）
+3. 任一 escalation trigger → 轉 L1/L2 標準 Validate Gate
+4. 若涉及 prod / release-adjacent config → 禁止 Fast Track
+5. 若涉及 release/deploy/tag/prod → L4 Releaser mandatory
 ```
 
 ### L1: 功能開發
@@ -151,9 +204,9 @@ Route to: debugger (定位) → developer (修復) → qa (驗證)
 HITL: 🟡 MEDIUM
 
 工作流:
-1. Debugger 定位 root cause（假設 ≥3）
-2. Developer 修復 + 補 regression test
-3. QA 驗證 fix
+1. Lane Selector 判斷 Quick Fix 或 Investigate
+2. Quick Fix：root cause known + regression validation available → Developer → QA → Architect 抽審 lane decision
+3. Investigate：root cause unknown / cross-module / hypotheses required → Debugger 3 hypotheses → Developer → QA → Architect
 4. retry_count 上限 3 次
 5. Architect 抽審 Validate Report
 ```
@@ -195,6 +248,41 @@ Architect 禁止執行:
   ❌ git tag / gh release create
   ❌ git push --force
 ```
+
+---
+
+## Step 6 — Lane Selector + Task Pool / Auto Pilot
+
+完成 L0-L4 routing 後，v0.4 Lane Selector 會根據 `classifier_result` 與 Execution Contract 產生 `lane_decision`。v1.0 Task Pool / Auto Pilot 只消費這些結果，不重新分類任務。
+
+### 6.1 Lane Selector input / output
+
+```yaml
+classifier_result:
+  final_layer: L0 | L1 | L2 | L3 | L4
+  confidence: number
+  conflict_status: aligned | conflict_reviewed | scorer_dominance
+
+lane_decision:
+  lane: L0_Fast_Track | L1_Standard | L2_QuickFix | L2_Investigate | L3_HighRisk | L4_Releaser
+  required_agents: list[string]
+  qa_required: boolean
+  hitl_required: boolean
+  hitl_mode: auto_approve | review | pre_approval
+```
+
+### 6.2 Task Pool / Auto Pilot guardrails
+
+| Lane | Auto Pilot 行為 | 不可繞過的 guard |
+|---|---|---|
+| L0_Fast_Track | 可產生 diff report / audit log | 僅限 safe L0；prod/release-adjacent 必須 escalation |
+| L1_Standard | queued workflow | Developer → QA → Architect 抽審 |
+| L2_QuickFix | queued workflow | QA regression + Architect lane review |
+| L2_Investigate | queued workflow | Debugger → Developer → QA → Architect |
+| L3_HighRisk | blocked until approval | Human pre-approval |
+| L4_Releaser | blocked until Releaser + HITL | `agent-releaser` mandatory；auto-release path = 0 |
+
+Task Pool item 必須記錄 `retry_count`、`validate_history`、`hitl_state`、`depends_on` / `blocked_by` 與 audit log。Validate Gate FAIL 時 `retry_count + 1`；`retry_count >= 3` 必須升級給 User。
 
 ---
 
@@ -291,7 +379,9 @@ Step 3: fallback → ask clarifying question
 
 ---
 
-## 開發方向（V2 待辦）
+## 長期開發方向（Future backlog）
+
+> 注意：以下是長期 backlog，不是 Phase v2.0 Graphify Optional Enhancement。Phase v2.0 僅處理 Graphify optional context enrichment。
 
 - [ ] 中文 keywords 支援（中英並列）
 - [ ] 自動計算 confidence 的腳本（`scripts/intake_classify.py`）
