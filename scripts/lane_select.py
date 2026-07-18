@@ -311,12 +311,6 @@ def lane_selector(execution_contract: dict, classifier_result: dict) -> dict:
     - L2 Quick Fix vs Investigate split
     - L0 Fast Track with eligibility check
     - L1 Standard feature lane
-    
-    Returns dict with fields consumed by downstream:
-      - lane/escalation_triggered/required_agents: pool.py, observability_report.py
-      - qa_required/hitl_required/hitl_mode: pool.py, observability_report.py
-      - l4_mandatory_delegation/bypass_risk: observability_report.py (governance signals)
-      - escalation_reason: debug/audit
     """
     final_layer = classifier_result.get("final_layer", "")
     confidence = classifier_result.get("confidence", 0.0)

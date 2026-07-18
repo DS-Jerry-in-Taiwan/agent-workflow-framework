@@ -25,19 +25,6 @@ DEFAULT_POOL_ROOT = Path(__file__).parent.parent / "docs" / "agent_context" / "p
 DEFAULT_POOL_INDEX = DEFAULT_POOL_ROOT / "pool.yaml"
 SUBDIRS = ["active", "pending", "blocked", "completed"]
 
-# Schema drift watch: reads ~15 fields from pool item dicts created by pool.py.
-# See scripts/pool.py module docstring for full item schema.
-# When pool.py adds fields to items, check if this module needs to read them.
-POOL_ITEM_FIELDS_READ = [
-    "status", "execution_contract.recommended_layer",
-    "execution_contract.risk_level", "classifier_result.final_layer",
-    "lane_decision.lane", "lane_decision.l4_mandatory_delegation",
-    "lane_decision.hitl_required", "lane_decision.qa_required",
-    "lane_decision.hitl_mode", "lane_decision.escalation_triggered",
-    "retry_count", "max_retry", "validate_history",
-    "is_pilot", "artifact_type",
-]
-
 # Required top-level keys in summary output
 REQUIRED_TOP_LEVEL_KEYS = [
     "generated_at",
