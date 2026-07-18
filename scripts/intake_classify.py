@@ -53,6 +53,11 @@ def compute_keyword_scores(text: str, routing_map: dict) -> dict:
     """
     Compute keyword match scores per layer.
     Returns dict: {layer_name: {"match_count": int, "total_keywords": int, "matched_keywords": [str]}}
+    
+    Data contract — consumed by downstream modules:
+      - lane_select.py reads `classifier_result: {final_layer, confidence, conflict_status}`.
+      - pool.py stores `classifier_result` dict as-is in item schema.
+      - observability_report.py reads `classifier_result.final_layer` as layer fallback.
     """
     normalized = normalize_text(text)
     words = set(normalized.split())
@@ -128,7 +133,10 @@ def apply_dominance(matched_layers: list) -> str:
 def classify(input_text: str, routing_map: dict) -> dict:
     """
     Main classification logic.
-    Returns structured classifier result.
+    Returns structured classifier result dict with fields consumed by downstream:
+      - final_layer/confidence/mode: lane_select.py, pool.py, observability_report.py
+      - l4_mandatory_delegation: lane_select.py, observability_report.py
+      - dominance_applied: debug/audit
     """
     scores = compute_keyword_scores(input_text, routing_map)
     
