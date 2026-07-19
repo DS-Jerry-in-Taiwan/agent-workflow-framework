@@ -54,6 +54,7 @@ REQUIRED_TOP_LEVEL_KEYS = [
     "validate_summary",
     "governance_signals",
     "integrity_warnings",
+    "continuation_summary",
 ]
 
 # Required markdown sections
@@ -163,6 +164,10 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
     hitl_required_count = 0
     qa_required_count = 0
 
+    # v3.5 Continuation summary (backward-compatible; safe for old items)
+    continuation_counts_by_state: dict[str, int] = {}
+    continuation_must_stop_trigger_count: int = 0
+
     # Integrity warnings
     integrity_warnings = list(item_warnings)
 
@@ -256,6 +261,16 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
         if lane_decision.get("qa_required", False) is True:
             qa_required_count += 1
 
+        # v3.5 Continuation summary (backward-compatible)
+        cp = item.get("continuation_policy")
+        if isinstance(cp, dict) and cp.get("last_decision") is not None:
+            last_state = cp["last_decision"].get("state", "UNKNOWN")
+            continuation_counts_by_state[last_state] = (
+                continuation_counts_by_state.get(last_state, 0) + 1
+            )
+            triggers = cp["last_decision"].get("must_stop_triggers", [])
+            continuation_must_stop_trigger_count += len(triggers)
+
     # Build governance_signals dict
     governance_signals = {
         "l4_mandatory_delegation_count": l4_mandatory_delegation_count,
@@ -297,6 +312,10 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
         "validate_summary": validate_summary,
         "governance_signals": governance_signals,
         "integrity_warnings": integrity_warnings,
+        "continuation_summary": {
+            "counts_by_state": continuation_counts_by_state,
+            "must_stop_trigger_count": continuation_must_stop_trigger_count,
+        },
     }
 
     return summary
