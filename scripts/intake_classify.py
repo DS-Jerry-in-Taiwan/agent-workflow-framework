@@ -10,6 +10,11 @@ Dominance: L4_release > L3_refactor > L2_bug_fix > L1_feature_dev > L0_config_ho
 Usage:
     python3 scripts/intake_classify.py "fix threshold bug"
     echo "release prod" | python3 scripts/intake_classify.py
+
+L4 responsibility: When the classifier outputs ``final_layer=L4_release``, the task MUST be delegated
+to ``agent-releaser``. The Architect must NOT execute release, deploy, tag, merge, push-to-main, or
+any production operation directly. See ``lane_select.lane_selector()`` for the ZERO_BYPASS
+enforcement point.
 """
 
 import json
@@ -137,6 +142,8 @@ def classify(input_text: str, routing_map: dict) -> dict:
       - final_layer/confidence/mode: lane_select.py, pool.py, observability_report.py
       - l4_mandatory_delegation: lane_select.py, observability_report.py
       - dominance_applied: debug/audit
+      - l4_mandatory_delegation: True when final_layer == "L4_release". Critical input to
+        lane_select.lane_selector() for zero-bypass enforcement.
     """
     scores = compute_keyword_scores(input_text, routing_map)
     
