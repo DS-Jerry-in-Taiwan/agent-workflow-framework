@@ -45,6 +45,12 @@ Lane Decision Output:
   "l4_mandatory_delegation": boolean,
   "bypass_risk": "string"
 }
+
+L4 ZERO_BYPASS enforcement: The ``L4_Releaser`` lane is the single enforcement point for mandatory
+delegation to ``agent-releaser``. When the classifier or execution contract indicates an L4 (release)
+operation, ``lane_selector()`` returns ``l4_mandatory_delegation=True``, and the lane decision
+requires HITL pre-approval with ``agent-releaser`` as the sole target agent. No other lane or code
+path may bypass this guard.
 """
 
 import argparse
@@ -306,7 +312,12 @@ def lane_selector(execution_contract: dict, classifier_result: dict) -> dict:
     Main lane selection logic following v0.4 spec.
     
     Implements:
-    - L4 Releaser mandatory (no bypass)
+    - L4 Releaser mandatory (ZERO_BYPASS) — This function is the ONLY enforcement point for L4
+      delegation. When ``final_layer == "L4"`` (via ``classifier_result.final_layer`` or
+      ``execution_contract.recommended_layer``), the decision MUST return
+      ``l4_mandatory_delegation=True`` with ``lane="L4_Releaser"`` and ``hitl_mode="pre_approval"``.
+      Downstream modules (``pool.py``, ``agend_message_adapter.py``, ``observability_report.py``)
+      must never override this enforcement.
     - L3 HIGH Risk with pre-approval
     - L2 Quick Fix vs Investigate split
     - L0 Fast Track with eligibility check

@@ -11,6 +11,16 @@ Exports:
     validate_workflow_decision(decision: dict) -> tuple[bool, list[str]]
     governance_pre_dispatch(decision: dict) -> tuple[bool, str | None]
     format_dispatch_payload(decision: dict) -> dict
+
+Scope: This module is a **local-only mock/simulation layer**. It validates decision contracts and
+formats payloads that a future live AgEnD dispatcher would send. It does NOT:
+  - Connect to any AgEnD service or external dispatcher
+  - Make network calls
+  - Persist dispatch state to any queue or database
+  - Execute or route any task to a remote agent
+
+For production use, an AgEnD client or similar dispatcher would consume the output of
+``format_dispatch_payload()``.
 """
 
 from __future__ import annotations

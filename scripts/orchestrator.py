@@ -35,6 +35,11 @@ from pathlib import Path
 
 
 # Ensure parent is on path so continuation_policy can be imported
+# NOTE: This sys.path.insert works when orchestrator.py is run from the repo
+# root (e.g., via `python3 scripts/orchestrator.py`).  In packaged/installed
+# environments or unconventional runners, a different path strategy may be
+# required.  If import errors occur despite this block, verify that the repo
+# root is in sys.path or use PYTHONPATH.
 _SCRIPT_DIR = Path(__file__).parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR.parent))
