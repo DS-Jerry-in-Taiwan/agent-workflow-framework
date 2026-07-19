@@ -308,6 +308,14 @@ def cmd_add(args):
             # pilot artifact metadata
             "is_pilot": is_pilot,
             "artifact_type": artifact_type,
+            # v3.5 continuation_policy (optional, backward-compatible)
+            "continuation_policy": loaded.get("continuation_policy") or {
+                "auto_continue_allowed": False,
+                "checkpoint_complete": False,
+                "current_phase": None,
+                "last_decision": None,
+                "context_flags": {},
+            },
         }
 
         # Write item file to pool directory
@@ -404,6 +412,14 @@ def cmd_add(args):
         # pilot artifact metadata
         "is_pilot": bool(args.pilot),
         "artifact_type": "pilot" if args.pilot else "task",
+        # v3.5 continuation_policy (optional, backward-compatible)
+        "continuation_policy": {
+            "auto_continue_allowed": False,
+            "checkpoint_complete": False,
+            "current_phase": None,
+            "last_decision": None,
+            "context_flags": {},
+        },
     }
 
     # Create item file

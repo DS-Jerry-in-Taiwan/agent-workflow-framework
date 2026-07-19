@@ -84,6 +84,7 @@ def _make_item(
     missing_lane_decision: bool = False,
     missing_risk: bool = False,
     missing_recommended_layer: bool = False,
+    continuation_policy: dict | None = None,
 ) -> dict:
     """Create a pool item dict with specified attributes."""
     item = {
@@ -130,6 +131,10 @@ def _make_item(
     item["validate_history"] = validate_history if validate_history is not None else []
     item["is_pilot"] = is_pilot
     item["artifact_type"] = artifact_type
+
+    # v3.5 continuation_policy (optional, backward-compatible)
+    if continuation_policy is not None:
+        item["continuation_policy"] = continuation_policy
 
     return item
 
@@ -602,6 +607,128 @@ class TestPilotCounts(unittest.TestCase):
             self.assertEqual(pilot["is_pilot_false"], 1)
             self.assertEqual(pilot["pilot"], 1)
             self.assertEqual(pilot["task"], 1)
+
+
+# ---------------------------------------------------------------------------
+# Tests — continuation_summary counts_by_state
+# ---------------------------------------------------------------------------
+
+
+class TestContinuationSummary(unittest.TestCase):
+    """continuation_summary correctly counts states and triggers from continuation_policy.last_decision."""
+
+    def test_counts_known_states_correctly(self):
+        """🟢 Items with auto_continue and ask_user last_decision are counted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_root.mkdir(parents=True)
+            (pool_root / "pending").mkdir()
+
+            _write_json(
+                pool_root / "pending" / "item1.json",
+                _make_item("item1", continuation_policy={
+                    "last_decision": {"state": "auto_continue", "must_stop_triggers": []},
+                }),
+            )
+            _write_json(
+                pool_root / "pending" / "item2.json",
+                _make_item("item2", continuation_policy={
+                    "last_decision": {"state": "ask_user", "must_stop_triggers": ["retry_exhausted"]},
+                }),
+            )
+            _write_json(
+                pool_root / "pending" / "item3.json",
+                _make_item("item3", continuation_policy={
+                    "last_decision": {"state": "auto_continue", "must_stop_triggers": []},
+                }),
+            )
+
+            pool_index = _write_pool_index(pool_root, [])
+
+            summary = build_summary(pool_root, pool_index)
+            cs = summary["continuation_summary"]
+
+            self.assertEqual(cs["counts_by_state"]["auto_continue"], 2)
+            self.assertEqual(cs["counts_by_state"]["ask_user"], 1)
+
+    def test_old_item_without_continuation_not_counted(self):
+        """🔴 Old item without continuation_policy is not counted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_root.mkdir(parents=True)
+            (pool_root / "pending").mkdir()
+
+            _write_json(
+                pool_root / "pending" / "item1.json",
+                _make_item("item1"),  # no continuation_policy
+            )
+
+            pool_index = _write_pool_index(pool_root, [])
+
+            summary = build_summary(pool_root, pool_index)
+            cs = summary["continuation_summary"]
+            self.assertEqual(cs["counts_by_state"], {})
+
+    def test_empty_pool_zero_counts(self):
+        """📏 Empty pool has zero continuation counts."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_root.mkdir(parents=True)
+            pool_index = _write_pool_index(pool_root, [])
+
+            summary = build_summary(pool_root, pool_index)
+            cs = summary["continuation_summary"]
+            self.assertEqual(cs["counts_by_state"], {})
+            self.assertEqual(cs["must_stop_trigger_count"], 0)
+
+    def test_must_stop_trigger_counted(self):
+        """🎯 Item with retry_exhausted trigger increments trigger count."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_root.mkdir(parents=True)
+            (pool_root / "pending").mkdir()
+
+            _write_json(
+                pool_root / "pending" / "item1.json",
+                _make_item("item1", continuation_policy={
+                    "last_decision": {
+                        "state": "ask_user",
+                        "must_stop_triggers": ["retry_exhausted", "scope_expansion"],
+                    },
+                }),
+            )
+
+            pool_index = _write_pool_index(pool_root, [])
+
+            summary = build_summary(pool_root, pool_index)
+            cs = summary["continuation_summary"]
+            self.assertEqual(cs["must_stop_trigger_count"], 2)
+
+    def test_continuation_summary_in_required_keys(self):
+        """continuation_summary is in REQUIRED_TOP_LEVEL_KEYS."""
+        self.assertIn("continuation_summary", REQUIRED_TOP_LEVEL_KEYS)
+
+    def test_malformed_item_intacts_continuation_summary(self):
+        """🔲 Malformed item does not crash continuation_summary."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_root.mkdir(parents=True)
+            (pool_root / "pending").mkdir()
+
+            _write_json(
+                pool_root / "pending" / "good.json",
+                _make_item("good", continuation_policy={
+                    "last_decision": {"state": "auto_continue", "must_stop_triggers": []},
+                }),
+            )
+            (pool_root / "pending" / "bad.json").write_text("{ bad json }", encoding="utf-8")
+
+            pool_index = _write_pool_index(pool_root, [])
+
+            summary = build_summary(pool_root, pool_index)
+            cs = summary["continuation_summary"]
+            self.assertEqual(cs["counts_by_state"]["auto_continue"], 1)
+            self.assertGreaterEqual(len(summary["integrity_warnings"]), 1)
 
 
 # ---------------------------------------------------------------------------

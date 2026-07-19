@@ -356,6 +356,14 @@ def format_dispatch_payload(decision: dict) -> dict:
         "bypass_risk": bypass_risk,
     }
 
+    # Optional: propagate continuation_decision into metadata
+    # (v3.5 backward-compatible extension; no existing key is removed)
+    cd: Any = decision.get("continuation_decision")
+    if isinstance(cd, dict):
+        metadata["continuation_state"] = cd.get("state", "unknown")
+        metadata["continuation_next_action"] = cd.get("next_action")
+        metadata["must_stop_triggers"] = cd.get("must_stop_triggers", [])
+
     # Build instructions from available context
     instructions_parts: list[str] = []
     ec = decision.get("execution_contract", {})
