@@ -23,6 +23,7 @@ from pathlib import Path
 # Default paths aligned with scripts/pool.py
 DEFAULT_POOL_ROOT = Path(__file__).parent.parent / "docs" / "agent_context" / "pool"
 DEFAULT_POOL_INDEX = DEFAULT_POOL_ROOT / "pool.yaml"
+RUNNER_STATE_PATH = Path(__file__).parent.parent / "docs" / "agent_context" / "runner_state.json"
 SUBDIRS = ["active", "pending", "blocked", "completed"]
 
 # Schema drift watch: reads ~15 fields from pool item dicts created by pool.py.
@@ -55,6 +56,8 @@ REQUIRED_TOP_LEVEL_KEYS = [
     "governance_signals",
     "integrity_warnings",
     "continuation_summary",
+    "runner_iteration_count",
+    "last_loop_timestamp",
 ]
 
 # Required markdown sections
@@ -316,7 +319,19 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
             "counts_by_state": continuation_counts_by_state,
             "must_stop_trigger_count": continuation_must_stop_trigger_count,
         },
+        "runner_iteration_count": 0,
+        "last_loop_timestamp": None,
     }
+
+    # Inject runner state if available (never crashes on missing file)
+    try:
+        if RUNNER_STATE_PATH.exists():
+            with open(RUNNER_STATE_PATH, "r", encoding="utf-8") as f:
+                runner_state = json.load(f)
+                summary["runner_iteration_count"] = runner_state.get("runner_iteration_count", 0)
+                summary["last_loop_timestamp"] = runner_state.get("last_loop_timestamp")
+    except (json.JSONDecodeError, OSError):
+        pass
 
     return summary
 
@@ -439,6 +454,14 @@ def render_markdown(summary: dict) -> str:
         lines.append("")
     else:
         lines.append("No integrity warnings detected.\n")
+
+    # Runner Loop
+    lines.append("## Runner Loop\n")
+    runner_iteration_count = summary.get("runner_iteration_count", 0)
+    last_loop_ts = summary.get("last_loop_timestamp")
+    lines.append(f"- **Iteration count:** {runner_iteration_count}")
+    lines.append(f"- **Last loop timestamp:** {last_loop_ts or 'Never'}")
+    lines.append("")
 
     return "\n".join(lines)
 
