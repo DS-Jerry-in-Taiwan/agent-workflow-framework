@@ -25,8 +25,440 @@ For production use, an AgEnD client or similar dispatcher would consume the outp
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import sys
+import uuid
+from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Event observability (Stream B — Phase 1)
+# ---------------------------------------------------------------------------
+
+SCHEMA_VERSION: str = "v3.7-b1"
+
+EVENT_TYPES: tuple[str, ...] = (
+    "workflow.classified",
+    "workflow.lane_selected",
+    "workflow.governance_blocked",
+    "workflow.dispatched",
+    "workflow.validate_result",
+    "workflow.runner_loop_iteration",
+)
+
+# Secret-like patterns that should be detected/redacted
+_SECRET_PATTERNS: list[re.Pattern] = [
+    re.compile(r"(?i)\b(api[_-]?key|apikey|api[_-]?secret)\b"),
+    re.compile(r"(?i)\b(token|auth[_-]?token|access[_-]?token)\b"),
+    re.compile(r"(?i)\b(password|passwd)\b"),
+    re.compile(r"(?i)\bsecret\b"),
+    re.compile(r"-----BEGIN\s+\w+\s+PRIVATE\s+KEY-----"),
+    re.compile(r"(?i)\b(ghp_|gho_|ghu_|ghs_|ghr_)[a-zA-Z0-9]{36}\b"),
+    re.compile(r"(?i)sk-[a-zA-Z0-9]{20,}"),
+]
+
+_EVENT_ID_PATTERN: re.Pattern = re.compile(r"^evt-[a-zA-Z0-9_-]+-\d{5}$")
+
+# ---------------------------------------------------------------------------
+# Event writer helpers
+# ---------------------------------------------------------------------------
+
+
+def _generate_session_id() -> str:
+    """Generate a short stable session ID for event_id prefix."""
+    # Use a hash of hostname + pid + random suffix for uniqueness
+    base = f"{uuid.uuid4().hex[:8]}"
+    return f"session-{base}"
+
+
+def _detect_secrets(text: str) -> int:
+    """Return count of secret-like patterns found in text."""
+    return sum(1 for pat in _SECRET_PATTERNS if pat.search(text))
+
+
+def _apply_summary_privacy(original_request: str | None) -> tuple[str, int, str]:
+    """
+    Apply summary-mode privacy to an original_request string.
+
+    Returns (preview, secrets_count, redaction_reason).
+    """
+    if original_request is None:
+        return "", 0, "default privacy mode: summary"
+
+    secrets_count = _detect_secrets(original_request)
+    if secrets_count > 0:
+        return "[REDACTED - potential secret]", secrets_count, "secret-like patterns detected"
+
+    if len(original_request) <= 80:
+        return original_request, 0, "default privacy mode: summary"
+
+    return original_request[:80] + "...", 0, "default privacy mode: summary"
+
+
+def _build_privacy_block(
+    mode: str,
+    original_request: str | None,
+    redaction_reason_override: str | None = None,
+) -> dict:
+    """Build the privacy sub-block for an event envelope."""
+    if mode == "raw":
+        secrets_count = _detect_secrets(original_request or "")
+        preview = original_request or ""
+        redacted = False
+        reason: str | None = None
+    else:
+        preview, secrets_count, default_reason = _apply_summary_privacy(original_request)
+        redacted = secrets_count > 0 or (original_request is not None and len(original_request) > 80)
+        reason = redaction_reason_override or default_reason
+
+    return {
+        "mode": mode,
+        "original_request_redacted": redacted,
+        "original_request_preview": preview,
+        "secrets_redacted_count": secrets_count,
+        "redaction_reason": reason,
+    }
+
+
+def _default_events_dir() -> Path:
+    """Return the events directory from env or default."""
+    env_dir = os.environ.get("AGEND_EVENTS_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path(__file__).parent.parent / "docs" / "agent_context" / "events"
+
+
+def _iso_timestamp() -> str:
+    """Return current UTC timestamp in ISO 8601 format."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+# ---------------------------------------------------------------------------
+# WorkflowEventWriter
+# ---------------------------------------------------------------------------
+
+
+class WorkflowEventWriter:
+    """
+    File-first JSONL event writer for workflow observability.
+
+    Best-effort writes: failure to write does not crash the caller.
+    Events are appended to ``events-YYYY-MM-DD.jsonl`` in the events directory.
+
+    Privacy default is "summary" — raw original_request requires AGEND_EVENT_PRIVACY=raw.
+    """
+
+    def __init__(
+        self,
+        events_dir: Path | str | None = None,
+        max_buffer: int = 100,
+        privacy_mode: str | None = None,
+    ):
+        self.events_dir: Path = Path(events_dir) if events_dir else _default_events_dir()
+        self.max_buffer: int = max_buffer
+        self._default_privacy_mode: str = privacy_mode or os.environ.get(
+            "AGEND_EVENT_PRIVACY", "summary"
+        )
+        self._session_id: str = _generate_session_id()
+        self._seq: int = 0
+        self._buffer: deque[str] = deque(maxlen=max_buffer)
+        self._current_file_date: str | None = None
+        self._file_handle: Any = None  # opened lazily
+        # Ensure directory exists
+        try:
+            self.events_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass  # best-effort; write will fail gracefully
+
+    def _current_file(self) -> Path:
+        """Return today's event file path, rotating if the date changed."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self._current_file_date:
+            self._close_file()
+            self._current_file_date = today
+        return self.events_dir / f"events-{today}.jsonl"
+
+    def _open_file(self) -> Any:
+        """Lazily open today's file for append."""
+        if self._file_handle is None:
+            try:
+                self._file_handle = open(self._current_file(), "a", encoding="utf-8")
+            except OSError as e:
+                print(f"EVENT_WRITE_FAILED: cannot open {self._current_file()}: {e}", file=sys.stderr)
+                return None
+        return self._file_handle
+
+    def _close_file(self) -> None:
+        """Close the current file handle."""
+        if self._file_handle is not None:
+            try:
+                self._file_handle.close()
+            except OSError:
+                pass
+            self._file_handle = None
+
+    def _write_line(self, line: str) -> bool:
+        """
+        Append one JSON line to the daily event file.
+
+        Returns True if write succeeded, False otherwise.
+        On failure: appends to in-memory buffer; prints warning to stderr.
+        """
+        fh = self._open_file()
+        if fh is None:
+            self._buffer.append(line)
+            if len(self._buffer) >= self.max_buffer:
+                dropped = self._buffer.popleft()
+                print(
+                    f"EVENT_BUFFER_FULL: dropping oldest event (buffer size {self.max_buffer})",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"EVENT_WRITE_FAILED: buffered (unwritable directory); buffer size {len(self._buffer)}",
+                    file=sys.stderr,
+                )
+            return False
+
+        try:
+            fh.write(line + "\n")
+            fh.flush()
+            # Replay buffered events
+            while self._buffer:
+                buffered = self._buffer.popleft()
+                try:
+                    fh.write(buffered + "\n")
+                except OSError:
+                    self._buffer.appendleft(buffered)  # put it back
+                    break
+            fh.flush()
+            return True
+        except OSError as e:
+            print(f"EVENT_WRITE_FAILED: {e}", file=sys.stderr)
+            self._buffer.append(line)
+            if len(self._buffer) >= self.max_buffer:
+                self._buffer.popleft()
+                print(
+                    f"EVENT_BUFFER_FULL: dropping oldest event (buffer size {self.max_buffer})",
+                    file=sys.stderr,
+                )
+            return False
+
+    def emit_event(
+        self,
+        event_type: str,
+        data: dict,
+        workflow_id: str | None = None,
+        correlation_id: str | None = None,
+        privacy_mode: str | None = None,
+        original_request: str | None = None,
+    ) -> str:
+        """
+        Build, write (or buffer) an event.
+
+        Returns the event_id string. Never raises; logs to stderr on failure.
+        """
+        self._seq += 1
+        event_id = f"evt-{self._session_id}-{self._seq:05d}"
+        mode = privacy_mode or self._default_privacy_mode
+
+        event = {
+            "event_id": event_id,
+            "event_type": event_type,
+            "timestamp": _iso_timestamp(),
+            "source": "agend_message_adapter.emit_event",
+            "workflow_id": workflow_id,
+            "correlation_id": correlation_id or workflow_id,
+            "data": data,
+            "privacy": _build_privacy_block(mode, original_request),
+            "schema_version": SCHEMA_VERSION,
+        }
+
+        try:
+            line = json.dumps(event, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            print(f"EVENT_SERIALIZE_FAILED: {e}", file=sys.stderr)
+            return event_id
+
+        self._write_line(line)
+        return event_id
+
+    def flush(self) -> int:
+        """Flush buffered events to disk. Returns count of events flushed."""
+        if not self._buffer:
+            return 0
+        flushed = 0
+        while self._buffer:
+            line = self._buffer.popleft()
+            if self._write_line(line):
+                flushed += 1
+            else:
+                break  # write failed again; stop flushing
+        return flushed
+
+    def close(self) -> None:
+        """Flush and close resources."""
+        self.flush()
+        self._close_file()
+
+    def __enter__(self) -> "WorkflowEventWriter":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
+
+# ---------------------------------------------------------------------------
+# Event validation helpers
+# ---------------------------------------------------------------------------
+
+
+def validate_event_line(line: str) -> tuple[bool, list[str]]:
+    """
+    Validate a single JSONL event line.
+
+    Returns (True, []) if valid, (False, [error, ...]) otherwise.
+
+    Checks:
+    - V1: well-formed JSON
+    - V2: envelope completeness (all 9 fields)
+    - V3: event_type is a registered type
+    - V4: timestamp is ISO 8601 with Z suffix
+    - V5: event_id matches pattern
+    - V6: schema_version == "v3.7-b1"
+    - V7: privacy block has all 5 sub-fields
+    - V9: no trailing commas (strict JSON)
+    - V10: valid UTF-8
+    """
+    errors: list[str] = []
+    stripped = line.strip()
+
+    if not stripped:
+        return False, ["empty line"]
+
+    # V1: parse JSON
+    try:
+        event = json.loads(stripped)
+    except json.JSONDecodeError as e:
+        return False, [f"invalid JSON: {e}"]
+
+    if not isinstance(event, dict):
+        return False, ["event is not a JSON object"]
+
+    # V2: all 9 envelope fields
+    required_envelope = [
+        "event_id", "event_type", "timestamp", "source",
+        "workflow_id", "correlation_id", "data", "privacy", "schema_version",
+    ]
+    for field in required_envelope:
+        if field not in event:
+            errors.append(f"missing envelope field: {field}")
+
+    if errors:
+        return False, errors
+
+    # V3: event_type
+    if event["event_type"] not in EVENT_TYPES:
+        errors.append(f"event_type '{event['event_type']}' is not registered")
+
+    # V4: timestamp ISO 8601 with Z
+    ts = event["timestamp"]
+    if not isinstance(ts, str) or not ts.endswith("Z"):
+        errors.append(f"timestamp '{ts}' must be ISO 8601 with Z suffix")
+    else:
+        try:
+            # Remove Z and parse
+            datetime.fromisoformat(ts[:-1] + "+00:00")
+        except ValueError:
+            errors.append(f"timestamp '{ts}' is not valid ISO 8601")
+
+    # V5: event_id pattern
+    eid = event["event_id"]
+    if not isinstance(eid, str) or not _EVENT_ID_PATTERN.match(eid):
+        errors.append(f"event_id '{eid}' does not match pattern evt-[session]-[seq:05d]")
+
+    # V6: schema_version
+    if event["schema_version"] != SCHEMA_VERSION:
+        errors.append(
+            f"schema_version must be '{SCHEMA_VERSION}', got '{event['schema_version']}'"
+        )
+
+    # V7: privacy block
+    privacy = event.get("privacy")
+    if isinstance(privacy, dict):
+        required_privacy = [
+            "mode", "original_request_redacted", "original_request_preview",
+            "secrets_redacted_count", "redaction_reason",
+        ]
+        for pf in required_privacy:
+            if pf not in privacy:
+                errors.append(f"privacy missing sub-field: {pf}")
+    else:
+        errors.append("privacy block is missing or not a dict")
+
+    return len(errors) == 0, errors
+
+
+def validate_event_file(filepath: str | Path) -> dict:
+    """
+    Validate an entire event file.
+
+    Returns:
+        {
+            "filepath": str,
+            "total_lines": int,
+            "valid_lines": int,
+            "invalid_lines": int,
+            "errors": [{"line": int, "messages": [str]}],
+            "event_type_counts": {str: int},
+            "first_timestamp": str | None,
+            "last_timestamp": str | None,
+        }
+    """
+    filepath = Path(filepath)
+    result: dict = {
+        "filepath": str(filepath),
+        "total_lines": 0,
+        "valid_lines": 0,
+        "invalid_lines": 0,
+        "errors": [],
+        "event_type_counts": {},
+        "first_timestamp": None,
+        "last_timestamp": None,
+    }
+
+    if not filepath.exists():
+        return result
+
+    try:
+        with open(filepath, "r", encoding="utf-8") as fh:
+            for line_no, line in enumerate(fh, start=1):
+                result["total_lines"] += 1
+                valid, errs = validate_event_line(line)
+                if valid:
+                    result["valid_lines"] += 1
+                    try:
+                        obj = json.loads(line.strip())
+                        et = obj.get("event_type", "unknown")
+                        result["event_type_counts"][et] = result["event_type_counts"].get(et, 0) + 1
+                        ts = obj.get("timestamp")
+                        if ts and result["first_timestamp"] is None:
+                            result["first_timestamp"] = ts
+                        result["last_timestamp"] = ts
+                    except Exception:
+                        pass
+                else:
+                    result["invalid_lines"] += 1
+                    result["errors"].append({"line": line_no, "messages": errs})
+    except OSError as e:
+        result["errors"].append({"line": 0, "messages": [f"cannot read file: {e}"]})
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Canonical constants (must stay in sync with docs/intake_layer/routing_map_v1.json)

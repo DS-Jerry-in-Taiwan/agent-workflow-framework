@@ -9,8 +9,12 @@ Uses stdlib unittest only. Covers:
 - Integration: validate → governance → format pipeline for L4 Releaser
 """
 
+import json
+import shutil
 import sys
+import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure scripts/ is on path
@@ -24,6 +28,10 @@ from scripts.agend_message_adapter import (
     validate_workflow_decision,
     governance_pre_dispatch,
     format_dispatch_payload,
+    WorkflowEventWriter,
+    validate_event_line,
+    validate_event_file,
+    EVENT_TYPES,
 )
 
 # ---------------------------------------------------------------------------
@@ -795,6 +803,280 @@ def _make_valid_l3_decision() -> dict:
             "audit_log_ref": None,
         },
     }
+
+
+# ===========================================================================
+# Test: WorkflowEventWriter and event emission
+# ===========================================================================
+
+
+class TestWorkflowEventWriter(unittest.TestCase):
+    """WorkflowEventWriter — initialization, event emission, privacy."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+
+    def test_event_writer_init(self):
+        """🟢 Writer creates its events directory."""
+        writer = WorkflowEventWriter(events_dir=self.tmp)
+        self.assertTrue(Path(self.tmp).exists())
+        self.assertEqual(writer.events_dir, Path(self.tmp))
+        self.assertEqual(writer._default_privacy_mode, "summary")
+
+    def test_emit_event_classified(self):
+        """🟢 workflow.classified event has correct envelope and data fields."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            eid = writer.emit_event(
+                "workflow.classified",
+                {
+                    "final_layer": "L2_bug_fix",
+                    "confidence": 0.87,
+                    "mode": "guarded",
+                    "matched_layers": ["L2_bug_fix", "L1_feature_dev"],
+                    "dominance_applied": False,
+                    "original_request_summary": "fix threshold bug in quality checks module",
+                },
+                workflow_id="workflow-20260720-001",
+                original_request="fix threshold bug in quality checks module",
+            )
+        self.assertTrue(eid.startswith("evt-"))
+        self.assertEqual(len(eid.split("-")), 4)  # evt-<sessionid>-<seq> (session contains no hyphens)
+        lines = self._read_lines()
+        self.assertEqual(len(lines), 1)
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["event_type"], "workflow.classified")
+        self.assertEqual(evt["workflow_id"], "workflow-20260720-001")
+        self.assertEqual(evt["schema_version"], "v3.7-b1")
+        self.assertIn("timestamp", evt)
+        self.assertIn("source", evt)
+        self.assertEqual(evt["data"]["final_layer"], "L2_bug_fix")
+        self.assertEqual(evt["data"]["confidence"], 0.87)
+        self.assertEqual(evt["privacy"]["mode"], "summary")
+
+    def test_emit_event_lane_selected(self):
+        """🟢 workflow.lane_selected event has correct lane and agent data."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.lane_selected",
+                {
+                    "lane": "L2_QuickFix",
+                    "required_agents": ["Developer", "QA", "Architect (spot-check)"],
+                    "qa_required": True,
+                    "hitl_required": False,
+                    "hitl_mode": "review",
+                    "bypass_risk": "MEDIUM — QA regression required",
+                    "l4_mandatory_delegation": False,
+                    "escalation_triggered": False,
+                    "escalation_reason": None,
+                },
+                workflow_id="workflow-20260720-002",
+            )
+        lines = self._read_lines()
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["event_type"], "workflow.lane_selected")
+        self.assertEqual(evt["data"]["lane"], "L2_QuickFix")
+        self.assertTrue(evt["data"]["qa_required"])
+        self.assertFalse(evt["data"]["l4_mandatory_delegation"])
+
+    def test_emit_event_governance_blocked(self):
+        """🟢 workflow.governance_blocked event has blocking reason and rule."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.governance_blocked",
+                {
+                    "reason": "CLARIFY_MODE — request requires clarification before dispatch",
+                    "blocking_rule": "mode_clarify",
+                    "final_layer": None,
+                    "confidence": 0.0,
+                    "mode": "clarify",
+                    "lane": None,
+                },
+                workflow_id="workflow-20260720-003",
+            )
+        lines = self._read_lines()
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["event_type"], "workflow.governance_blocked")
+        self.assertIn("reason", evt["data"])
+        self.assertIn("blocking_rule", evt["data"])
+        self.assertIn("CLARIFY_MODE", evt["data"]["reason"])
+
+    def test_emit_event_dispatched(self):
+        """🟢 workflow.dispatched event has correct dispatch fields."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.dispatched",
+                {
+                    "request_kind": "task",
+                    "target_agent": "agent-developer",
+                    "correlation_id": "workflow-20260720-001",
+                    "payload_kind": "task",
+                    "lane": "L2_QuickFix",
+                    "requires_reply": True,
+                },
+                workflow_id="workflow-20260720-001",
+            )
+        lines = self._read_lines()
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["event_type"], "workflow.dispatched")
+        self.assertEqual(evt["data"]["request_kind"], "task")
+        self.assertEqual(evt["data"]["target_agent"], "agent-developer")
+
+    def test_emit_event_validate_result(self):
+        """🟢 workflow.validate_result event has item_id, result, attempt, max_retry."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.validate_result",
+                {
+                    "item_id": "pool-20260720-001",
+                    "result": "PASS",
+                    "attempt": 1,
+                    "max_retry": 3,
+                    "layer": "L2_bug_fix",
+                    "lane": "L2_QuickFix",
+                    "validator": "agent-qa",
+                    "duration_seconds": 12.34,
+                    "details_summary": "All 15 tests passed",
+                },
+                workflow_id="workflow-20260720-001",
+            )
+        lines = self._read_lines()
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["event_type"], "workflow.validate_result")
+        self.assertEqual(evt["data"]["item_id"], "pool-20260720-001")
+        self.assertEqual(evt["data"]["result"], "PASS")
+        self.assertEqual(evt["data"]["attempt"], 1)
+
+    def test_event_id_unique(self):
+        """🟢 Sequential IDs within a session are monotonically increasing."""
+        ids: list[str] = []
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            for i in range(5):
+                eid = writer.emit_event(
+                    "workflow.classified",
+                    {"final_layer": "L1_feature_dev", "confidence": 0.8, "mode": "guarded",
+                     "matched_layers": [], "dominance_applied": False, "original_request_summary": "test"},
+                    original_request="test",
+                )
+                ids.append(eid)
+        self.assertEqual(len(ids), len(set(ids)), "event_ids must be unique")
+        # Check monotonic seq numbers
+        for i, eid in enumerate(ids, start=1):
+            self.assertTrue(eid.endswith(f"{i:05d}"))
+
+    def test_event_jsonl_valid(self):
+        """🟢 Every emitted line is valid JSON parseable by json.loads."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            for i, et in enumerate(EVENT_TYPES):
+                writer.emit_event(et, {"test": i})
+        lines = self._read_lines()
+        self.assertEqual(len(lines), len(EVENT_TYPES))
+        for line in lines:
+            try:
+                json.loads(line)
+            except json.JSONDecodeError:
+                self.fail(f"Line is not valid JSON: {line!r}")
+
+    def test_sink_failure_no_crash(self):
+        """🔴 Write failure does not crash caller; event_id is still returned."""
+        # Use /dev/full or a non-writable path simulation
+        writer = WorkflowEventWriter(events_dir="/dev/null")
+        eid = writer.emit_event(
+            "workflow.classified",
+            {"final_layer": "L1", "confidence": 0.8, "mode": "direct",
+             "matched_layers": [], "dominance_applied": False, "original_request_summary": "x"},
+        )
+        self.assertTrue(eid.startswith("evt-"))
+        # Should not raise
+        writer.close()
+
+    def test_privacy_default_summary(self):
+        """🟢 Default summary mode truncates request to 80 chars."""
+        long_request = "a" * 200
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.classified",
+                {"final_layer": "L1", "confidence": 0.8, "mode": "direct",
+                 "matched_layers": [], "dominance_applied": False, "original_request_summary": long_request},
+                original_request=long_request,
+            )
+        lines = self._read_lines()
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["privacy"]["mode"], "summary")
+        self.assertTrue(evt["privacy"]["original_request_redacted"])
+        self.assertEqual(len(evt["privacy"]["original_request_preview"]), 83)  # 80 + "..."
+        self.assertEqual(evt["privacy"]["original_request_preview"][-3:], "...")
+
+    def test_privacy_raw_mode(self):
+        """🟢 Raw mode preserves full original_request without truncation."""
+        long_request = "a" * 200
+        with WorkflowEventWriter(events_dir=self.tmp, privacy_mode="raw") as writer:
+            writer.emit_event(
+                "workflow.classified",
+                {"final_layer": "L1", "confidence": 0.8, "mode": "direct",
+                 "matched_layers": [], "dominance_applied": False, "original_request_summary": long_request},
+                original_request=long_request,
+                privacy_mode="raw",
+            )
+        lines = self._read_lines()
+        evt = json.loads(lines[0])
+        self.assertEqual(evt["privacy"]["mode"], "raw")
+        self.assertFalse(evt["privacy"]["original_request_redacted"])
+        self.assertEqual(evt["privacy"]["original_request_preview"], long_request)
+
+    def test_validate_event_line_valid(self):
+        """🟢 validate_event_line returns (True, []) for a valid event."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.classified",
+                {"final_layer": "L1", "confidence": 0.8, "mode": "direct",
+                 "matched_layers": [], "dominance_applied": False, "original_request_summary": "test"},
+                original_request="test",
+            )
+        lines = self._read_lines()
+        valid, errs = validate_event_line(lines[0])
+        self.assertTrue(valid, f"Expected valid, got errors: {errs}")
+
+    def test_validate_event_line_invalid(self):
+        """🔴 validate_event_line returns errors for bad event."""
+        bad = '{"event_id": "bad-id", "event_type": "workflow.unknown"}'
+        valid, errs = validate_event_line(bad)
+        self.assertFalse(valid)
+        self.assertTrue(len(errs) > 0)
+
+    def test_validate_event_file(self):
+        """🟢 validate_event_file returns counts and error list."""
+        with WorkflowEventWriter(events_dir=self.tmp) as writer:
+            writer.emit_event(
+                "workflow.classified",
+                {"final_layer": "L1", "confidence": 0.8, "mode": "direct",
+                 "matched_layers": [], "dominance_applied": False, "original_request_summary": "test"},
+                original_request="test",
+            )
+            writer.emit_event(
+                "workflow.lane_selected",
+                {"lane": "L1_Standard", "required_agents": [], "qa_required": True,
+                 "hitl_required": False, "hitl_mode": "review", "bypass_risk": "LOW",
+                 "l4_mandatory_delegation": False, "escalation_triggered": False, "escalation_reason": None},
+            )
+        result = validate_event_file(Path(self.tmp) / f"events-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl")
+        self.assertEqual(result["valid_lines"], 2)
+        self.assertEqual(result["invalid_lines"], 0)
+        self.assertEqual(result["total_lines"], 2)
+        self.assertIn("workflow.classified", result["event_type_counts"])
+
+    # ------------------------------------------------------------------
+    # Internal helpers for tests
+    # ------------------------------------------------------------------
+
+    def _read_lines(self) -> list[str]:
+        """Return all lines from today's event file."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        fpath = Path(self.tmp) / f"events-{today}.jsonl"
+        if not fpath.exists():
+            return []
+        with open(fpath, "r", encoding="utf-8") as fh:
+            return [line.rstrip("\n") for line in fh]
 
 
 # ===========================================================================
