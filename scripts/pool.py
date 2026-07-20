@@ -160,6 +160,8 @@ def create_item_file(item_id: str, item_data: dict, status: str, remove_from_oth
             if other_file.exists() and other_file != filepath:
                 other_file.unlink()
     
+    # Sync status into item_data so file content reflects current status
+    item_data["status"] = status
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(item_data, f, indent=2, ensure_ascii=False)
     
@@ -314,6 +316,7 @@ def cmd_add(args):
                 "checkpoint_complete": False,
                 "current_phase": None,
                 "last_decision": None,
+                "last_loop_timestamp": None,
                 "context_flags": {},
             },
         }
@@ -418,6 +421,7 @@ def cmd_add(args):
             "checkpoint_complete": False,
             "current_phase": None,
             "last_decision": None,
+            "last_loop_timestamp": None,
             "context_flags": {},
         },
     }
