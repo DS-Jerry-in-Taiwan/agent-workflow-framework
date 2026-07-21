@@ -88,19 +88,22 @@ VALID_LAYERS = [
 ]
 
 
-def ensure_pool_dirs():
+def ensure_pool_dirs(pool_root: Optional[Path] = None):
     """Ensure all pool subdirectories exist."""
-    POOL_ROOT.mkdir(parents=True, exist_ok=True)
+    root = pool_root or POOL_ROOT
+    root.mkdir(parents=True, exist_ok=True)
     for subdir in SUBDIRS:
-        (POOL_ROOT / subdir).mkdir(exist_ok=True)
+        (root / subdir).mkdir(exist_ok=True)
 
 
-def load_pool_index() -> dict:
+def load_pool_index(pool_root: Optional[Path] = None) -> dict:
     """Load pool.yaml (JSON-compatible YAML) as global state index."""
-    if not POOL_INDEX.exists():
+    root = pool_root or POOL_ROOT
+    index_path = root / "pool.yaml"
+    if not index_path.exists():
         return {"items": [], "version": "v1.0", "updated_at": None}
-    
-    with open(POOL_INDEX, "r", encoding="utf-8") as f:
+
+    with open(index_path, "r", encoding="utf-8") as f:
         content = f.read().strip()
         if not content:
             return {"items": [], "version": "v1.0", "updated_at": None}
@@ -112,31 +115,34 @@ def load_pool_index() -> dict:
             return {"items": [], "version": "v1.0", "updated_at": None}
 
 
-def save_pool_index(pool_index: dict):
+def save_pool_index(pool_index: dict, pool_root: Optional[Path] = None):
     """Save pool.yaml with JSON content (JSON-compatible YAML)."""
+    root = pool_root or POOL_ROOT
+    index_path = root / "pool.yaml"
     pool_index["updated_at"] = datetime.now(timezone.utc).isoformat()
-    with open(POOL_INDEX, "w", encoding="utf-8") as f:
+    with open(index_path, "w", encoding="utf-8") as f:
         json.dump(pool_index, f, indent=2, ensure_ascii=False)
 
 
-def generate_id() -> str:
+def generate_id(pool_root: Optional[Path] = None) -> str:
     """Generate unique pool item ID: pool-YYYYMMDD-NNN"""
     date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
-    
+
     # Count existing items for sequence number
-    pool_index = load_pool_index()
+    pool_index = load_pool_index(pool_root)
     existing = [item for item in pool_index.get("items", []) if item["id"].startswith(f"pool-{date_str}")]
     seq = len(existing) + 1
-    
+
     return f"pool-{date_str}-{seq:03d}"
 
 
-def create_item_file(item_id: str, item_data: dict, status: str, remove_from_other: bool = False):
+def create_item_file(item_id: str, item_data: dict, status: str, remove_from_other: bool = False, pool_root: Optional[Path] = None):
     """
     Create item YAML file in appropriate subdirectory.
-    
+
     If remove_from_other is True, removes the item file from other directories.
     """
+    root = pool_root or POOL_ROOT
     subdir_map = {
         STATUS_PENDING: "pending",
         STATUS_PICKED: "active",
@@ -149,37 +155,39 @@ def create_item_file(item_id: str, item_data: dict, status: str, remove_from_oth
         STATUS_HELD: "pending",
         STATUS_COMPLETED: "completed",
     }
-    
+
     subdir = subdir_map.get(status, "pending")
-    filepath = POOL_ROOT / subdir / f"{item_id}.json"
-    
+    filepath = root / subdir / f"{item_id}.json"
+
     # Remove from other directories if requested
     if remove_from_other:
         for other_dir in SUBDIRS:
-            other_file = POOL_ROOT / other_dir / f"{item_id}.json"
+            other_file = root / other_dir / f"{item_id}.json"
             if other_file.exists() and other_file != filepath:
                 other_file.unlink()
-    
+
     # Sync status into item_data so file content reflects current status
     item_data["status"] = status
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(item_data, f, indent=2, ensure_ascii=False)
-    
+
     return filepath
 
 
-def load_item_file(item_id: str) -> Optional[dict]:
+def load_item_file(item_id: str, pool_root: Optional[Path] = None) -> Optional[dict]:
     """Load item from any pool subdirectory."""
+    root = pool_root or POOL_ROOT
     for subdir in SUBDIRS:
-        filepath = POOL_ROOT / subdir / f"{item_id}.json"
+        filepath = root / subdir / f"{item_id}.json"
         if filepath.exists():
             with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
     return None
 
 
-def move_item_file(item_id: str, from_status: str, to_status: str):
+def move_item_file(item_id: str, from_status: str, to_status: str, pool_root: Optional[Path] = None):
     """Move item file between subdirectories on status change."""
+    root = pool_root or POOL_ROOT
     from_subdir_map = {
         STATUS_PENDING: "pending",
         STATUS_PICKED: "active",
@@ -192,18 +200,18 @@ def move_item_file(item_id: str, from_status: str, to_status: str):
         STATUS_HELD: "pending",
         STATUS_COMPLETED: "completed",
     }
-    
+
     to_subdir_map = from_subdir_map.copy()
-    
+
     from_subdir = from_subdir_map.get(from_status, "pending")
     to_subdir = to_subdir_map.get(to_status, "pending")
-    
+
     if from_subdir == to_subdir:
         return  # Same directory, no move needed
-    
-    src = POOL_ROOT / from_subdir / f"{item_id}.json"
-    dst = POOL_ROOT / to_subdir / f"{item_id}.json"
-    
+
+    src = root / from_subdir / f"{item_id}.json"
+    dst = root / to_subdir / f"{item_id}.json"
+
     if src.exists():
         data = json.loads(src.read_text())
         with open(dst, "w", encoding="utf-8") as f:
@@ -211,32 +219,33 @@ def move_item_file(item_id: str, from_status: str, to_status: str):
         src.unlink()
 
 
-def cmd_init():
+def cmd_init(pool_root: Optional[Path] = None):
     """Initialize pool directory structure and pool.yaml."""
-    ensure_pool_dirs()
-    
-    pool_index = load_pool_index()
+    root = pool_root or POOL_ROOT
+    ensure_pool_dirs(pool_root)
+
+    pool_index = load_pool_index(pool_root)
     if pool_index.get("items"):
-        print(f"Pool already initialized at {POOL_ROOT}")
+        print(f"Pool already initialized at {root}")
         print(f"Existing items: {len(pool_index['items'])}")
         return
-    
+
     pool_index = {
         "version": "v1.0",
         "items": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    
-    save_pool_index(pool_index)
-    print(f"Pool initialized at {POOL_ROOT}")
+
+    save_pool_index(pool_index, pool_root)
+    print(f"Pool initialized at {root}")
     print(f"Created directories: {', '.join(SUBDIRS)}")
     print(f"Created pool.yaml index.")
 
 
-def cmd_add(args):
+def cmd_add(args, pool_root: Optional[Path] = None):
     """Add a new task to the pool."""
-    ensure_pool_dirs()
+    ensure_pool_dirs(pool_root)
 
     # --- File-based add path ---
     if args.file:
@@ -253,7 +262,7 @@ def cmd_add(args):
             sys.exit(1)
 
         # Determine ID: use existing or generate new
-        item_id = loaded.get("id") or generate_id()
+        item_id = loaded.get("id") or generate_id(pool_root)
         now = datetime.now(timezone.utc).isoformat()
 
         # Determine pilot metadata: CLI --pilot takes precedence over loaded value
@@ -325,10 +334,10 @@ def cmd_add(args):
         }
 
         # Write item file to pool directory
-        create_item_file(item_id, item_data, STATUS_PENDING, remove_from_other=False)
+        create_item_file(item_id, item_data, STATUS_PENDING, remove_from_other=False, pool_root=pool_root)
 
         # Synchronize pool.yaml
-        pool_index = load_pool_index()
+        pool_index = load_pool_index(pool_root)
         layer = item_data["execution_contract"].get("recommended_layer", "L1_feature_dev")
         # Avoid duplicates if item with same ID was already in pool
         existing = [i for i in pool_index["items"] if i["id"] == item_id]
@@ -358,7 +367,7 @@ def cmd_add(args):
                         "runtime_mode": item_data.get("runtime_mode", "native"),
                     })
                     break
-        save_pool_index(pool_index)
+        save_pool_index(pool_index, pool_root)
 
         print(f"Added task from file: {item_id}")
         print(f"  Title: {item_data['title']}")
@@ -371,7 +380,7 @@ def cmd_add(args):
         print("Error: --title is required when --file is not provided.", file=sys.stderr)
         sys.exit(1)
 
-    item_id = generate_id()
+    item_id = generate_id(pool_root)
     now = datetime.now(timezone.utc).isoformat()
 
     # Build item data following v1.0 schema with safe defaults
@@ -435,10 +444,10 @@ def cmd_add(args):
     }
 
     # Create item file
-    create_item_file(item_id, item_data, STATUS_PENDING, remove_from_other=False)
+    create_item_file(item_id, item_data, STATUS_PENDING, remove_from_other=False, pool_root=pool_root)
 
     # Update pool index
-    pool_index = load_pool_index()
+    pool_index = load_pool_index(pool_root)
     pool_index["items"].append({
         "id": item_id,
         "status": STATUS_PENDING,
@@ -451,7 +460,7 @@ def cmd_add(args):
         # v3.7 Stream C runtime_mode: use CLI arg if provided, else default "native"
         "runtime_mode": getattr(args, "runtime_mode", None) or "native",
     })
-    save_pool_index(pool_index)
+    save_pool_index(pool_index, pool_root)
 
     print(f"Added task: {item_id}")
     print(f"  Title: {args.title}")
@@ -459,9 +468,9 @@ def cmd_add(args):
     print(f"  Status: {STATUS_PENDING}")
 
 
-def cmd_list(args):
+def cmd_list(args, pool_root: Optional[Path] = None):
     """List pool items, optionally filtered by status."""
-    pool_index = load_pool_index()
+    pool_index = load_pool_index(pool_root)
     items = pool_index.get("items", [])
     
     if not items:
@@ -486,9 +495,9 @@ def cmd_list(args):
             print(f"      Layer: {item['layer']}")
 
 
-def cmd_pick(args):
+def cmd_pick(args, pool_root: Optional[Path] = None):
     """Pick the next available item from pending queue."""
-    pool_index = load_pool_index()
+    pool_index = load_pool_index(pool_root)
     items = pool_index.get("items", [])
     
     # Find pending items not blocked
@@ -507,28 +516,28 @@ def cmd_pick(args):
     # Pick first non-blocked item
     picked = None
     for item in pending:
-        item_data = load_item_file(item["id"])
+        item_data = load_item_file(item["id"], pool_root)
         if item_data and not item_data.get("blocked_by"):
             picked = item
             break
-    
+
     if not picked:
         print("All pending items are blocked by dependencies.")
         return
-    
+
     item_id = picked["id"]
-    
+
     # Update status
     picked["status"] = STATUS_PICKED
-    
+
     # Update item file
-    item_data = load_item_file(item_id)
+    item_data = load_item_file(item_id, pool_root)
     if item_data:
         item_data["status"] = STATUS_PICKED
         item_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-        create_item_file(item_id, item_data, STATUS_PICKED, remove_from_other=True)
-    
-    save_pool_index(pool_index)
+        create_item_file(item_id, item_data, STATUS_PICKED, remove_from_other=True, pool_root=pool_root)
+
+    save_pool_index(pool_index, pool_root)
     
     print(f"Picked task: {item_id}")
     print(f"  Title: {picked.get('title', 'N/A')}")
@@ -536,10 +545,10 @@ def cmd_pick(args):
     print(f"  Run 'pool.py status {item_id}' for details.")
 
 
-def cmd_status(args):
+def cmd_status(args, pool_root: Optional[Path] = None):
     """Show detailed status of a pool item."""
     item_id = args.task_id
-    item_data = load_item_file(item_id)
+    item_data = load_item_file(item_id, pool_root)
     
     if not item_data:
         print(f"Task not found: {item_id}")
@@ -564,41 +573,41 @@ def cmd_status(args):
             print(f"    - Attempt {v.get('attempt')}: {v.get('result')} by {v.get('validator')}")
 
 
-def cmd_complete(args):
+def cmd_complete(args, pool_root: Optional[Path] = None):
     """Mark a task as completed."""
     item_id = args.task_id
-    item_data = load_item_file(item_id)
-    
+    item_data = load_item_file(item_id, pool_root)
+
     if not item_data:
         print(f"Task not found: {item_id}")
         sys.exit(1)
-    
+
     current_status = item_data.get("status")
-    
+
     # Validate transition
     if current_status not in [STATUS_VALIDATED, STATUS_IN_PROGRESS, STATUS_PICKED, STATUS_QA_PENDING]:
         print(f"Cannot complete from status '{current_status}'")
         print(f"Valid transitions to 'completed': validated, in_progress, qa_pending, picked")
         sys.exit(1)
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
+
     # Update item
     item_data["status"] = STATUS_COMPLETED
     item_data["updated_at"] = now
     item_data["completed_at"] = now
-    
+
     # Update pool index
-    pool_index = load_pool_index()
+    pool_index = load_pool_index(pool_root)
     for item in pool_index["items"]:
         if item["id"] == item_id:
             item["status"] = STATUS_COMPLETED
             break
-    save_pool_index(pool_index)
-    
+    save_pool_index(pool_index, pool_root)
+
     # Move file to completed directory (removes from other dirs)
-    create_item_file(item_id, item_data, STATUS_COMPLETED, remove_from_other=True)
-    
+    create_item_file(item_id, item_data, STATUS_COMPLETED, remove_from_other=True, pool_root=pool_root)
+
     print(f"Task completed: {item_id}")
     print(f"  Title: {item_data.get('title', 'N/A')}")
     print(f"  Final status: {STATUS_COMPLETED}")
@@ -628,12 +637,20 @@ Examples:
   python3 scripts/pool.py complete pool-20260716-001
         """
     )
-    
+
+    # Top-level --pool-root argument (before subparsers)
+    parser.add_argument(
+        "--pool-root",
+        type=Path,
+        default=None,
+        help="Pool root directory (default: POOL_ROOT constant in pool.py)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    
+
     # init
     subparsers.add_parser("init", help="Initialize pool directory structure")
-    
+
     # add
     add_parser = subparsers.add_parser("add", help="Add a new task")
     add_parser.add_argument("--title", "-t", help="Task title (required if --file not used)")
@@ -652,41 +669,43 @@ Examples:
         default="native",
         help="Runtime mode for this task (native or omo). Default: native.",
     )
-    
+
     # list
     list_parser = subparsers.add_parser("list", help="List pool items")
     list_parser.add_argument("--status", "-s", choices=VALID_STATUSES, help="Filter by status")
-    
+
     # pick
     subparsers.add_parser("pick", help="Pick next available task")
-    
+
     # status
     status_parser = subparsers.add_parser("status", help="Show task details")
     status_parser.add_argument("task_id", help="Task ID (e.g., pool-20260716-001)")
-    
+
     # complete
     complete_parser = subparsers.add_parser("complete", help="Mark task as completed")
     complete_parser.add_argument("task_id", help="Task ID (e.g., pool-20260716-001)")
-    
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
+    pool_root = args.pool_root  # None means use module-level POOL_ROOT
+
     # Execute command
     if args.command == "init":
-        cmd_init()
+        cmd_init(pool_root)
     elif args.command == "add":
-        cmd_add(args)
+        cmd_add(args, pool_root)
     elif args.command == "list":
-        cmd_list(args)
+        cmd_list(args, pool_root)
     elif args.command == "pick":
-        cmd_pick(args)
+        cmd_pick(args, pool_root)
     elif args.command == "status":
-        cmd_status(args)
+        cmd_status(args, pool_root)
     elif args.command == "complete":
-        cmd_complete(args)
+        cmd_complete(args, pool_root)
     else:
         parser.print_help()
         sys.exit(1)
