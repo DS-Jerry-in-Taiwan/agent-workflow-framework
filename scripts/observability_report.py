@@ -37,6 +37,7 @@ POOL_ITEM_FIELDS_READ = [
     "lane_decision.hitl_mode", "lane_decision.escalation_triggered",
     "retry_count", "max_retry", "validate_history",
     "is_pilot", "artifact_type",
+    "runtime_mode",
 ]
 
 # Required top-level keys in summary output
@@ -50,6 +51,7 @@ REQUIRED_TOP_LEVEL_KEYS = [
     "counts_by_layer",
     "counts_by_lane",
     "counts_by_risk",
+    "counts_by_mode",
     "pilot_counts",
     "retry_summary",
     "validate_summary",
@@ -147,6 +149,7 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
     counts_by_lane = defaultdict(int)
     counts_by_risk = defaultdict(int)
     pilot_counts = {"pilot": 0, "task": 0, "is_pilot_true": 0, "is_pilot_false": 0}
+    counts_by_mode: dict[str, int] = {}  # v3.7 Stream C
 
     # Retry tracking
     total_retry_count = 0
@@ -274,6 +277,10 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
             triggers = cp["last_decision"].get("must_stop_triggers", [])
             continuation_must_stop_trigger_count += len(triggers)
 
+        # v3.7 Stream C: mode counting (backward-compatible; items without field default to native)
+        runtime_mode = item.get("runtime_mode", "native")
+        counts_by_mode[runtime_mode] = counts_by_mode.get(runtime_mode, 0) + 1
+
     # Build governance_signals dict
     governance_signals = {
         "l4_mandatory_delegation_count": l4_mandatory_delegation_count,
@@ -310,6 +317,7 @@ def build_summary(pool_root: Path, pool_index_path: Path) -> dict:
         "counts_by_layer": dict(counts_by_layer),
         "counts_by_lane": dict(counts_by_lane),
         "counts_by_risk": dict(counts_by_risk),
+        "counts_by_mode": counts_by_mode,
         "pilot_counts": pilot_counts,
         "retry_summary": retry_summary,
         "validate_summary": validate_summary,
@@ -406,6 +414,16 @@ def render_markdown(summary: dict) -> str:
         lines.append(f"- **Tasks:** {pilot_counts.get('task', 0)}")
         lines.append(f"- **is_pilot=True:** {pilot_counts.get('is_pilot_true', 0)}")
         lines.append(f"- **is_pilot=False:** {pilot_counts.get('is_pilot_false', 0)}")
+        lines.append("")
+
+    # v3.7 Stream C: Counts by Mode
+    counts_by_mode = summary.get("counts_by_mode", {})
+    if counts_by_mode:
+        lines.append("### Counts by Mode\n")
+        lines.append("| Mode | Count |")
+        lines.append("|------|-------|")
+        for mode, count in sorted(counts_by_mode.items()):
+            lines.append(f"| {mode} | {count} |")
         lines.append("")
 
     # Validate Gate

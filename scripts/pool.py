@@ -295,6 +295,9 @@ def cmd_add(args):
                 "hitl_required": False,
                 "hitl_mode": "review",
             },
+            # v3.7 Stream C runtime_mode: use loaded value if present (first-write wins),
+            # else fall back to CLI arg or default "native". Backward-compatible for old items.
+            "runtime_mode": loaded.get("runtime_mode", "native"),
             # v1.0 safe defaults
             "retry_count": loaded.get("retry_count", 0),
             "max_retry": loaded.get("max_retry", 3),
@@ -339,6 +342,7 @@ def cmd_add(args):
                 "created_at": item_data["created_at"],
                 "is_pilot": is_pilot,
                 "artifact_type": artifact_type,
+                "runtime_mode": item_data.get("runtime_mode", "native"),
             })
         else:
             # Update existing entry
@@ -351,6 +355,7 @@ def cmd_add(args):
                         "priority": item_data.get("priority", 999),
                         "is_pilot": is_pilot,
                         "artifact_type": artifact_type,
+                        "runtime_mode": item_data.get("runtime_mode", "native"),
                     })
                     break
         save_pool_index(pool_index)
@@ -415,6 +420,9 @@ def cmd_add(args):
         # pilot artifact metadata
         "is_pilot": bool(args.pilot),
         "artifact_type": "pilot" if args.pilot else "task",
+        # v3.7 Stream C runtime_mode: use CLI arg if provided, else default "native"
+        # getattr guards against test mocks that don't set the attribute
+        "runtime_mode": getattr(args, "runtime_mode", None) or "native",
         # v3.5 continuation_policy (optional, backward-compatible)
         "continuation_policy": {
             "auto_continue_allowed": False,
@@ -440,6 +448,8 @@ def cmd_add(args):
         "created_at": now,
         "is_pilot": bool(args.pilot),
         "artifact_type": "pilot" if args.pilot else "task",
+        # v3.7 Stream C runtime_mode: use CLI arg if provided, else default "native"
+        "runtime_mode": getattr(args, "runtime_mode", None) or "native",
     })
     save_pool_index(pool_index)
 
@@ -636,6 +646,12 @@ Examples:
     add_parser.add_argument("--risk", choices=["LOW", "MEDIUM", "HIGH"], help="Risk level")
     add_parser.add_argument("--priority", "-p", type=int, help="Priority (1=highest)")
     add_parser.add_argument("--pilot", action="store_true", help="Mark task as generated pilot artifact")
+    add_parser.add_argument(
+        "--runtime-mode",
+        choices=["native", "omo"],
+        default="native",
+        help="Runtime mode for this task (native or omo). Default: native.",
+    )
     
     # list
     list_parser = subparsers.add_parser("list", help="List pool items")
