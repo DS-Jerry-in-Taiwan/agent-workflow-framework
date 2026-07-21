@@ -113,91 +113,78 @@ def run_autonomous_pass(
     start_time = time.time()
     runner_state = load_runner_state()
 
-    # pool_root override via module-level monkey-patch
-    if pool_root is not None:
-        _orig_root = pool.POOL_ROOT
-        _orig_idx = pool.POOL_INDEX
-        pool.POOL_ROOT = pool_root
-        pool.POOL_INDEX = pool_root / "pool.yaml"
+    pool_index = pool.load_pool_index(pool_root=pool_root)
+    active_entry = orchestrator.find_active_pool_item(pool_index)
 
-    try:
-        pool_index = pool.load_pool_index()
-        active_entry = orchestrator.find_active_pool_item(pool_index)
+    if active_entry is None:
+        _log("no active item, exiting cleanly")
+        _save_and_return(runner_state, EXIT_CLEAN)
+        return EXIT_CLEAN
 
-        if active_entry is None:
-            _log("no active item, exiting cleanly")
-            _save_and_return(runner_state, EXIT_CLEAN)
-            return EXIT_CLEAN
+    item_id = active_entry["id"]
+    item = pool.load_item_file(item_id, pool_root=pool_root)
+    if item is None:
+        _log(f"active entry {item_id} has no item file, exiting cleanly")
+        _save_and_return(runner_state, EXIT_CLEAN)
+        return EXIT_CLEAN
 
-        item_id = active_entry["id"]
-        item = pool.load_item_file(item_id)
-        if item is None:
-            _log(f"active entry {item_id} has no item file, exiting cleanly")
-            _save_and_return(runner_state, EXIT_CLEAN)
-            return EXIT_CLEAN
+    now_iso = _now_iso()
 
-        now_iso = _now_iso()
-
-        # ---- L4 pre-check ----
-        if _is_l4_item(item):
-            _log(f"L4 task {item_id} — mandatory handoff, skipping")
-            # Secondary gate: malformed item where dispatch would be True but delegation is False
-            decision = orchestrator.evaluate_message_against_item(message, item)
-            if orchestrator.should_dispatch_continuation(decision):
-                if not item.get("lane_decision", {}).get("l4_mandatory_delegation", False):
-                    _log(f"malformed item {item_id}: mandatory_handoff without l4_mandatory_delegation, blocking")
-                    _save_and_return(runner_state, EXIT_HANDLED)
-                    return EXIT_HANDLED
-            _save_and_return(runner_state, EXIT_HANDLED)
-            return EXIT_HANDLED
-
-        # ---- Evaluate continuation ----
+    # ---- L4 pre-check ----
+    if _is_l4_item(item):
+        _log(f"L4 task {item_id} — mandatory handoff, skipping")
+        # Secondary gate: malformed item where dispatch would be True but delegation is False
         decision = orchestrator.evaluate_message_against_item(message, item)
-        can_dispatch = orchestrator.should_dispatch_continuation(decision)
+        if orchestrator.should_dispatch_continuation(decision):
+            if not item.get("lane_decision", {}).get("l4_mandatory_delegation", False):
+                _log(f"malformed item {item_id}: mandatory_handoff without l4_mandatory_delegation, blocking")
+                _save_and_return(runner_state, EXIT_HANDLED)
+                return EXIT_HANDLED
+        _save_and_return(runner_state, EXIT_HANDLED)
+        return EXIT_HANDLED
 
-        if can_dispatch:
-            agents = item.get("lane_decision", {}).get("required_agents", [])
-            _log(f"dispatch {item_id} → [{','.join(agents)}] state={decision.get('state','unknown')}")
+    # ---- Evaluate continuation ----
+    decision = orchestrator.evaluate_message_against_item(message, item)
+    can_dispatch = orchestrator.should_dispatch_continuation(decision)
 
-            # Write back continuation_policy fields
-            cp = item.setdefault("continuation_policy", {})
-            cp["last_decision"] = decision
-            cp["last_loop_timestamp"] = now_iso
+    if can_dispatch:
+        agents = item.get("lane_decision", {}).get("required_agents", [])
+        _log(f"dispatch {item_id} → [{','.join(agents)}] state={decision.get('state','unknown')}")
 
-            # Status transition
-            next_status = _determine_next_status(item)
-            final_status = next_status if next_status else item.get("status", pool.STATUS_IN_PROGRESS)
+        # Write back continuation_policy fields
+        cp = item.setdefault("continuation_policy", {})
+        cp["last_decision"] = decision
+        cp["last_loop_timestamp"] = now_iso
 
-            pool.create_item_file(item_id, item, final_status, remove_from_other=True)
-            for entry in pool_index.get("items", []):
-                if entry["id"] == item_id:
-                    entry["status"] = final_status
-                    break
-            pool.save_pool_index(pool_index)
+        # Status transition
+        next_status = _determine_next_status(item)
+        final_status = next_status if next_status else item.get("status", pool.STATUS_IN_PROGRESS)
 
-            # Bounds checks
-            if time.time() - start_time >= hard_timeout:
-                _log(f"hard_timeout_exceeded ({time.time() - start_time:.1f}s >= {hard_timeout}s)")
-                _save_and_return(runner_state, EXIT_BOUNDS)
-                return EXIT_BOUNDS
+        pool.create_item_file(item_id, item, final_status, remove_from_other=True, pool_root=pool_root)
+        for entry in pool_index.get("items", []):
+            if entry["id"] == item_id:
+                entry["status"] = final_status
+                break
+        pool.save_pool_index(pool_index, pool_root=pool_root)
 
-            if max_items <= 0:
-                _log("max_items_exceeded (0)")
-                _save_and_return(runner_state, EXIT_BOUNDS)
-                return EXIT_BOUNDS
+        # Bounds checks
+        if time.time() - start_time >= hard_timeout:
+            _log(f"hard_timeout_exceeded ({time.time() - start_time:.1f}s >= {hard_timeout}s)")
+            _save_and_return(runner_state, EXIT_BOUNDS)
+            return EXIT_BOUNDS
 
-            _save_and_return(runner_state, EXIT_CLEAN)
-            return EXIT_CLEAN
+        if max_items <= 0:
+            _log("max_items_exceeded (0)")
+            _save_and_return(runner_state, EXIT_BOUNDS)
+            return EXIT_BOUNDS
 
-        else:
-            _log(f"skip {item_id} reason={decision.get('state', 'unknown')}")
-            _save_and_return(runner_state, EXIT_HANDLED)
-            return EXIT_HANDLED
+        _save_and_return(runner_state, EXIT_CLEAN)
+        return EXIT_CLEAN
 
-    finally:
-        if pool_root is not None:
-            pool.POOL_ROOT = _orig_root
-            pool.POOL_INDEX = _orig_idx
+    else:
+        _log(f"skip {item_id} reason={decision.get('state', 'unknown')}")
+        _save_and_return(runner_state, EXIT_HANDLED)
+        return EXIT_HANDLED
 
 
 def _save_and_return(state: dict, exit_code: int) -> None:

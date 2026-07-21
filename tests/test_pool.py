@@ -587,6 +587,98 @@ class TestCmdStatus(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Tests — --pool-root CLI propagation
+# ---------------------------------------------------------------------------
+
+class TestPoolRoot(unittest.TestCase):
+    """pool.py --pool-root flag creates/reads isolated pool."""
+
+    def test_pool_root_init_creates_at_custom_path(self):
+        """--pool-root /tmp/X init creates pool.yaml at /tmp/X"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "custom"
+            pool.cmd_init(pool_root=pool_root)
+            self.assertTrue((pool_root / "pool.yaml").exists())
+            for subdir in pool.SUBDIRS:
+                self.assertTrue((pool_root / subdir).exists())
+
+    def test_pool_root_add_writes_to_custom_path(self):
+        """--pool-root /tmp/X add writes item to /tmp/X/pending/"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "custom"
+            args = _make_args(title="pool root test", layer="L1")
+            pool.cmd_init(pool_root=pool_root)
+            pool.cmd_add(args, pool_root=pool_root)
+            pending = pool_root / "pending"
+            json_files = list(pending.glob("*.json"))
+            self.assertEqual(len(json_files), 1)
+            item = _read_json(json_files[0])
+            self.assertEqual(item["title"], "pool root test")
+
+    def test_pool_root_list_reads_custom_pool(self):
+        """--pool-root /tmp/X list shows items from /tmp/X pool"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "custom"
+            args = _make_args(title="list test", layer="L2")
+            pool.cmd_init(pool_root=pool_root)
+            pool.cmd_add(args, pool_root=pool_root)
+            idx = pool.load_pool_index(pool_root=pool_root)
+            self.assertEqual(len(idx.get("items", [])), 1)
+            self.assertEqual(idx["items"][0]["title"], "list test")
+
+    def test_pool_root_status_reads_custom_item(self):
+        """--pool-root /tmp/X status reads item from /tmp/X pool"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "custom"
+            args = _make_args(title="status test", layer="L1")
+            pool.cmd_init(pool_root=pool_root)
+            pool.cmd_add(args, pool_root=pool_root)
+            idx = pool.load_pool_index(pool_root=pool_root)
+            item_id = idx["items"][0]["id"]
+            item = pool.load_item_file(item_id, pool_root=pool_root)
+            self.assertIsNotNone(item)
+            self.assertEqual(item["title"], "status test")
+
+    def test_pool_root_pick_works(self):
+        """--pool-root /tmp/X pick reads from and writes to custom pool"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "custom"
+            args = _make_args(title="pick test", layer="L1", priority=1)
+            pool.cmd_init(pool_root=pool_root)
+            pool.cmd_add(args, pool_root=pool_root)
+            pool.cmd_pick(None, pool_root=pool_root)
+            idx = pool.load_pool_index(pool_root=pool_root)
+            self.assertEqual(idx["items"][0]["status"], pool.STATUS_PICKED)
+
+    def test_pool_root_complete_works(self):
+        """--pool-root /tmp/X complete marks item as completed"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "custom"
+            args = _make_args(title="complete test", layer="L1", priority=1)
+            pool.cmd_init(pool_root=pool_root)
+            pool.cmd_add(args, pool_root=pool_root)
+            pool.cmd_pick(None, pool_root=pool_root)
+            idx = pool.load_pool_index(pool_root=pool_root)
+            item_id = idx["items"][0]["id"]
+            complete_args = __import__("argparse").Namespace(task_id=item_id)
+            pool.cmd_complete(complete_args, pool_root=pool_root)
+            idx2 = pool.load_pool_index(pool_root=pool_root)
+            self.assertEqual(idx2["items"][0]["status"], pool.STATUS_COMPLETED)
+
+    def test_default_pool_root_still_works(self):
+        """Without --pool-root, pool uses module-level POOL_ROOT"""
+        # This test verifies backward compat: calling cmd_init() with no pool_root
+        # uses the default POOL_ROOT (which is the module constant)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pool_root = Path(tmpdir) / "pool"
+            pool_index = pool_root / "pool.yaml"
+            with patch.object(pool, "POOL_ROOT", pool_root), \
+                 patch.object(pool, "POOL_INDEX", pool_index):
+                pool.cmd_init()  # backward compat: no pool_root arg
+                self.assertTrue(pool_index.exists())
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
