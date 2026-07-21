@@ -261,6 +261,9 @@ class WorkflowEventWriter:
         Build, write (or buffer) an event.
 
         Returns the event_id string. Never raises; logs to stderr on failure.
+
+        Note: if ``data`` contains a ``runtime_mode`` field (e.g. from a pool item
+        with v3.7 Stream C metadata), it is propagated into the event payload automatically.
         """
         self._seq += 1
         event_id = f"evt-{self._session_id}-{self._seq:05d}"
