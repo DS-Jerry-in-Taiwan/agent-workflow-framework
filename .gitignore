@@ -36,5 +36,16 @@ opencode.json
 scripts/__pycache__/
 tests/__pycache__/
 
-# Documentation (full directory; canonical routing docs are already committed)
-docs/
+# Documentation (ignore generated/context docs by default; allow formal specs below)
+docs/*
+!docs/schemas/
+!docs/schemas/**
+!docs/validate_gate/
+!docs/validate_gate/**
+!docs/release_governance/
+!docs/release_governance/**
+!docs/runtime_backend/
+!docs/runtime_backend/**
+!docs/intake_layer/
+docs/intake_layer/*
+!docs/intake_layer/routing_map_v1.json

@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "execution_contract_schema",
+  "title": "AWF Execution Contract",
+  "description": "Canonical input boundary contract for AWF governance loop. Produced by Phase 0 Input Contract Adapter from raw natural-language requests, structured JSON files, A2A messages, or PM spec artifacts.",
+  "type": "object",
+  "required": ["execution_contract"],
+  "properties": {
+    "execution_contract": {
+      "type": "object",
+      "description": "The typed work-item contract consumed by the AWF governance loop.",
+      "required": [
+        "clarified_spec",
+        "scope_boundary",
+        "success_criteria",
+        "validation_plan",
+        "risk_level",
+        "recommended_layer",
+        "next_step",
+        "residual_ambiguity"
+      ],
+      "properties": {
+        "clarified_spec": {
+          "type": "string",
+          "description": "Concise, single-line task description derived from the raw input. Not a full spec — AWF ingests, it does not brainstorm.",
+          "minLength": 1,
+          "examples": [
+            "Fix false positive in threshold check",
+            "Release version v1.2.3 to production",
+            "Add Tavily search provider"
+          ]
+        },
+        "scope_boundary": {
+          "type": "object",
+          "description": "Explicit in/out scope for the task. When input is raw natural language, both lists default to empty.",
+          "required": ["in_scope", "out_of_scope"],
+          "properties": {
+            "in_scope": {
+              "type": "array",
+              "description": "Files, modules, or areas that are within scope for this task.",
+              "items": { "type": "string" },
+              "default": [],
+              "examples": [
+                ["src/quality/checks.py"],
+                ["ruff.toml"],
+                ["release.json", "CHANGELOG.md"]
+              ]
+            },
+            "out_of_scope": {
+              "type": "array",
+              "description": "Files, modules, or areas explicitly excluded from this task.",
+              "items": { "type": "string" },
+              "default": [],
+              "examples": [
+                ["src/services/*.py"],
+                ["UI changes"],
+                ["New features"]
+              ]
+            }
+          }
+        },
+        "success_criteria": {
+          "type": "array",
+          "description": "Measurable, testable criteria that define when the task is complete. When input is raw natural language, this list defaults to empty — humans must fill it in during contract review.",
+          "items": { "type": "string" },
+          "default": [],
+          "examples": [
+            ["Existing tests pass", "False positive rate < 5%"],
+            ["Tag created", "Release notes generated"]
+          ]
+        },
+        "validation_plan": {
+          "type": "array",
+          "description": "Step-by-step validation steps to confirm the task meets success criteria. Generic entry ('Run full test suite') is added for obvious fix/bug inputs; otherwise defaults to empty for raw input.",
+          "items": { "type": "string" },
+          "default": [],
+          "examples": [
+            ["Run existing test suite", "Manual verification"],
+            ["Verify tag format", "Check release.json consistency"]
+          ]
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH"],
+          "description": "Risk assessment for the task. Determines governance guards and HITL mode.",
+          "examples": ["LOW", "MEDIUM", "HIGH"]
+        },
+        "recommended_layer": {
+          "type": "string",
+          "enum": [
+            "L0_config_housekeeping",
+            "L1_feature_dev",
+            "L2_bug_fix",
+            "L3_refactor",
+            "L4_release"
+          ],
+          "description": "AWF routing layer recommendation derived from keyword scan of raw input. L4_release tasks must be delegated to agent-releaser.",
+          "examples": [
+            "L0_config_housekeeping",
+            "L1_feature_dev",
+            "L2_bug_fix",
+            "L3_refactor",
+            "L4_release"
+          ]
+        },
+        "next_step": {
+          "type": "string",
+          "description": "Human-readable description of the immediate next action to take, based on the recommended layer.",
+          "minLength": 1,
+          "examples": [
+            "Implement config change",
+            "Plan feature implementation",
+            "Debug and fix",
+            "Plan refactoring",
+            "Delegate to agent-releaser"
+          ]
+        },
+        "residual_ambiguity": {
+          "type": "array",
+          "description": "List of unresolved questions or ambiguities that remain after ingestion. Always includes a note for raw natural-language input: 'Input was raw — contract needs human review for scope and criteria'. Humans must address these before the task enters execution.",
+          "items": { "type": "string" },
+          "examples": [
+            ["Input was raw — contract needs human review for scope and criteria"],
+            ["Root cause unknown", "Intermittent timing issue?"]
+          ]
+        }
+      }
+    }
+  }
+}
