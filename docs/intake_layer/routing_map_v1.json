@@ -1,0 +1,213 @@
+{
+  "_version": "v1",
+  "_classification_basis": "dev_task_type",
+  "_description": "開發任務類型分類，用於 Intake Layer 將使用者需求路由到對應的工作流程",
+  "_sources": [
+    "git log (150+ commits): 實際任務類型統計",
+    "session history: HITL偏好、step-by-step、branch-first 工作習慣",
+    "Project patterns: Phase, Fix-NNN, Release, MR 循環"
+  ],
+  "_workflow_notes": {
+    "branch_first": "User compares branches before making decisions",
+    "step_by_step": "Prefers incremental execution with checkpoint at each step",
+    "strict_hitl": "Every push/merge/PR requires Human confirmation",
+    "quality_gate": "Validate Gate with max 3 retries before escalation",
+    "release_governance": "4 guards before prod deploy (format, release.json, ancestry, confirmation)",
+    "releaser_mandatory": "L4 must be delegated to agent-releaser; architect must not execute"
+  },
+  "layers": {
+    "L0_config_housekeeping": {
+      "name": "配置 & 雜務",
+      "git_types": [ "chore", "docs", "ci" ],
+      "description": "改 config、版本號、文件、CI 腳本、環境設定",
+      "risk_level": "🟢 LOW",
+      "confidence_threshold": 0.55,
+      "routing_agent": "developer (輕量) / architect (需審查)",
+      "keywords": [
+        "config", "setting", "search_config", "llm_config", "post_processing",
+        "version", "bump", "release.json", "CHANGELOG",
+        "ci", "workflow", "trigger", "re-run",
+        "docs", "changelog", "env", "Dockerfile",
+        "requirements", "dependency", "upgrade"
+      ],
+      "typical_files": [
+        "config/*.json",
+        "release.json",
+        "CHANGELOG.md",
+        ".github/workflows/*.yml",
+        "ruff.toml",
+        "pyproject.toml",
+        "requirements.txt",
+        "serverless.yml",
+        "README.md"
+      ],
+      "test_expectation": "No new tests required; existing tests must pass",
+      "hitl_mode": "🟢 LOW — auto-approve unless prod config changed"
+    },
+    "L1_feature_dev": {
+      "name": "功能開發",
+      "git_types": [ "feat", "Phase" ],
+      "description": "新 processor、新 quality check、新搜尋策略、新增 CI job",
+      "risk_level": "🟡 MEDIUM",
+      "confidence_threshold": 0.65,
+      "routing_agent": "architect (規劃) → developer (實作) → qa (驗證)",
+      "keywords": [
+        "new", "add", "feature", "processor",
+        "quality check", "search strategy", "provider",
+        "tavily", "gemini_fewshot", "parallel", "scrape", "crawl",
+        "prompt", "template", "output mode",
+        "storage", "dynamodb", "sqlite",
+        "pipeline", "register", "plugin"
+      ],
+      "typical_files": [
+        "src/services/*.py",
+        "src/processors/*.py",
+        "src/quality/*.py",
+        "src/schemas/*.py",
+        "src/storage/*.py",
+        "src/langgraph_state/*.py",
+        "src/functions/utils/*.py",
+        "config/*.json",
+        "tests/test_*.py"
+      ],
+      "test_expectation": "New tests required for new functionality; existing tests must pass",
+      "hitl_mode": "🟡 MEDIUM — architect 抽審 Validate Report"
+    },
+    "L2_bug_fix": {
+      "name": "除錯修復",
+      "git_types": [ "fix", "Fix-\\d{3}" ],
+      "description": "修 bug、調整 quality threshold、修 path error、error handler 改進",
+      "risk_level": "🟡 MEDIUM",
+      "confidence_threshold": 0.65,
+      "routing_agent": "debugger (定位) → developer (修復) → qa (驗證)",
+      "keywords": [
+        "fix", "bug", "error", "broken", "crash", "wrong",
+        "false positive", "false negative", "threshold",
+        "not working", "fails", "exception",
+        "regression", "lint", "F541", "import",
+        "path", "missing", "timeout", "retry", "exhausted"
+      ],
+      "typical_files": [
+        "src/**/*.py (any source file)",
+        "src/quality/checks.py",
+        "src/quality/break-rule-list.md",
+        "config/*.json"
+      ],
+      "test_expectation": "Add regression test if possible; existing tests must pass",
+      "hitl_mode": "🟡 MEDIUM — architect 抽審 Validate Report"
+    },
+    "L3_refactor": {
+      "name": "重構架構",
+      "git_types": [ "refactor" ],
+      "description": "import 路徑統一、abstract layer 抽離、目錄重組、技術債清理",
+      "risk_level": "🔴 HIGH",
+      "confidence_threshold": 0.75,
+      "routing_agent": "architect (規劃+審查) → developer (實作) → qa (驗證)",
+      "keywords": [
+        "refactor", "restructure", "rename", "move",
+        "extract", "abstract", "unify", "consolidate",
+        "reorganize", "split", "merge module",
+        "import path", "sys.path", "circular import",
+        "technical debt", "clean up", "deprecate"
+      ],
+      "typical_files": [
+        "src/**/*.py (wide impact)",
+        "pyproject.toml (package structure)",
+        "import statements across multiple files"
+      ],
+      "test_expectation": "All existing tests must pass; update test imports if paths change",
+      "hitl_mode": "🔴 HIGH — Pre-approval 逐條審查"
+    },
+    "L4_release": {
+      "name": "發布部署",
+      "git_types": [ "Release" ],
+      "description": "版本發布、PR merge、prod deploy、release governance、CI/CD 監控",
+      "risk_level": "🔴 HIGH — 必須委派 agent-releaser",
+      "confidence_threshold": 0.85,
+      "routing_agent": "releaser (強制委派，architect 不得執行)",
+      "keywords": [
+        "release", "deploy", "tag", "version",
+        "prod", "production", "MR", "merge all",
+        "v0.", "release_tag", "release.json",
+        "healthcheck", "alb",
+        "CI/CD", "workflow_dispatch",
+        "branch promotion", "main", "dev"
+      ],
+      "typical_files": [
+        "release.json",
+        "CHANGELOG.md",
+        "serverless.yml",
+        ".github/workflows/deploy-prod.yml",
+        ".github/workflows/deploy-dev.yml",
+        "README.md"
+      ],
+      "test_expectation": "Healthcheck must pass; all CI checks must pass before deploy",
+      "hitl_mode": "🔴 HIGH — Pre-approval + Releaser delegation（Architect 禁止自行執行）",
+      "mandatory_delegation": true,
+      "delegation_steps": [
+        "Audit → branch → commit (conventional commits) → PR/MR → CI/CD monitor"
+      ],
+      "docs_to_create": [
+        "docs/agent_context/release_{version}/deployment_plan.md",
+        "docs/agent_context/release_{version}/release_log.md"
+      ]
+    }
+  },
+  "routing_rules": {
+    "r0_config_housekeeping": {
+      "keywords": [ "config", "version", "bump", "changelog", "ci", "setting", "env", "dependency" ],
+      "route_to": "L0_config_housekeeping",
+      "agent": "developer / architect",
+      "hitl": "🟢 LOW",
+      "confidence_boost": 0.20
+    },
+    "r1_feature_dev": {
+      "keywords": [ "new", "add", "feature", "feat", "processor", "strategy", "provider", "pipeline", "register" ],
+      "route_to": "L1_feature_dev",
+      "agent": "architect → developer → qa",
+      "hitl": "🟡 MEDIUM",
+      "confidence_boost": 0.15
+    },
+    "r2_bug_fix": {
+      "keywords": [ "fix", "bug", "broken", "error", "wrong", "crash", "fails", "exception", "lint", "regression" ],
+      "route_to": "L2_bug_fix",
+      "agent": "debugger → developer → qa",
+      "hitl": "🟡 MEDIUM",
+      "confidence_boost": 0.15
+    },
+    "r3_refactor": {
+      "keywords": [ "refactor", "restructure", "rename", "unify", "clean up", "abstract", "extract", "reorganize" ],
+      "route_to": "L3_refactor",
+      "agent": "architect → developer → qa",
+      "hitl": "🔴 HIGH (pre-approval)",
+      "confidence_boost": 0.20
+    },
+    "r4_release_deploy": {
+      "keywords": [ "release", "deploy", "prod", "production", "tag", "merge all", "MR", "version bump", "release.json" ],
+      "route_to": "L4_release",
+      "agent": "releaser (mandatory delegation)",
+      "hitl": "🔴 HIGH (mandatory pre-approval + delegation)",
+      "mandatory_delegation": true,
+      "architect_must_not_execute": true,
+      "confidence_boost": 0.20
+    },
+    "fallback_low_confidence": {
+      "condition": "confidence < 0.55",
+      "action": "ask clarifying question: 'Is this a config change, new feature, bug fix, refactoring, or release task?'"
+    },
+    "cross_layer_dominance": {
+      "rationale": "If keywords from multiple layers match, route to HIGHEST risk layer",
+      "dominance_order": [ "L4_release", "L3_refactor", "L2_bug_fix", "L1_feature_dev", "L0_config_housekeeping" ]
+    }
+  },
+  "confidence_scoring": {
+    "formula": "confidence = 0.65 * margin_component + 0.35 * ratio_component",
+    "margin_component": "(top_score - second_score) / top_score",
+    "ratio_component": "top_match_count / top_total_keywords",
+    "thresholds": {
+      "strict":  { "min": 0.85, "label": "direct routing, no exploration" },
+      "guarded": { "min": 0.55, "label": "route but allow file exploration" },
+      "standard": { "min": 0.00, "label": "ask clarifying question" }
+    }
+  }
+}
