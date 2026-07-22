@@ -682,7 +682,7 @@ class TestReturnValueTypes(unittest.TestCase):
         expected = [
             "scripts/intake_classify.py",
             "scripts/lane_select.py",
-            "docs/intake_layer/routing_map_v1.json",
+            "config/routing_map_v1.json",
         ]
         for file_path in expected:
             self.assertIn(file_path, SHARED_CANONICAL_FILES)

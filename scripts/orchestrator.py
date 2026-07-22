@@ -25,7 +25,7 @@ This module is stdlib-only, does NOT modify:
     - scripts/intake_classify.py
     - scripts/lane_select.py
     - scripts/pool.py
-    - docs/intake_layer/routing_map_v1.json
+    - config/routing_map_v1.json
 """
 
 from __future__ import annotations

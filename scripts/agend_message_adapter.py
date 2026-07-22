@@ -464,7 +464,7 @@ def validate_event_file(filepath: str | Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Canonical constants (must stay in sync with docs/intake_layer/routing_map_v1.json)
+# Canonical constants (must stay in sync with config/routing_map_v1.json)
 # ---------------------------------------------------------------------------
 
 KNOWN_LAYERS: tuple[str, ...] = (

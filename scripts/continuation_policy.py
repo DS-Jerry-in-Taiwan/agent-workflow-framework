@@ -14,7 +14,7 @@ This module is standalone and does NOT modify:
 - scripts/lane_select.py
 - scripts/pool.py
 - scripts/observability_report.py
-- docs/intake_layer/routing_map_v1.json
+- config/routing_map_v1.json
 
 Usage (library):
     from scripts.continuation_policy import decide_continuation, evaluate_parallel_work_packages
@@ -524,7 +524,7 @@ SHARED_CANONICAL_FILES = [
     "scripts/lane_select.py",
     "scripts/pool.py",
     "scripts/observability_report.py",
-    "docs/intake_layer/routing_map_v1.json",
+    "config/routing_map_v1.json",
     "opencode.json",
     ".opencode/opencode.json",
 ]

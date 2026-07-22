@@ -46,6 +46,3 @@ docs/*
 !docs/release_governance/**
 !docs/runtime_backend/
 !docs/runtime_backend/**
-!docs/intake_layer/
-docs/intake_layer/*
-!docs/intake_layer/routing_map_v1.json

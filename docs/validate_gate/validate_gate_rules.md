@@ -147,6 +147,6 @@ Source: Architect Prompt § Validate Gate
 
 - `docs/architecture/development_stage_framework.md` — AWF governance loop architecture
 - `docs/schemas/execution_contract_schema.json` — Execution Contract boundary schema
-- `docs/intake_layer/routing_map_v1.json` — L0-L4 routing and confidence thresholds
+- `config/routing_map_v1.json` — L0-L4 routing and confidence thresholds
 - `scripts/lane_select.py` — lane selection with QA gates
 - `scripts/orchestrator.py` — Validate Gate integration in governance loop

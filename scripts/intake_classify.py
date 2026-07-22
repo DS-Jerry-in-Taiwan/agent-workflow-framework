@@ -228,7 +228,7 @@ def main():
     # Determine routing_map path
     script_dir = Path(__file__).parent
     repo_root = script_dir.parent
-    routing_map_path = repo_root / "docs" / "intake_layer" / "routing_map_v1.json"
+    routing_map_path = repo_root / "config" / "routing_map_v1.json"
     
     if not routing_map_path.exists():
         print(json.dumps({

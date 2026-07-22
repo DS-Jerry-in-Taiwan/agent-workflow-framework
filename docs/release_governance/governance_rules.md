@@ -187,7 +187,7 @@ Post-release audit document. Created after the release completes.
 ## 5. References
 
 - `docs/architecture/development_stage_framework.md` — AWF governance loop architecture
-- `docs/intake_layer/routing_map_v1.json` — L4_release routing, mandatory_delegation, delegation_steps
+- `config/routing_map_v1.json` — L4_release routing, mandatory_delegation, delegation_steps
 - `docs/architecture/architecture_evaluation_summary.md` — Release governance evaluation
 - `scripts/lane_select.py` — L4 lane with Releaser mandatory delegation
 - `scripts/omo_dispatch_adapter.py` — OmO adapter rejects L4 tasks (stays in Releaser governance)

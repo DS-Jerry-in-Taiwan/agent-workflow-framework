@@ -58,9 +58,10 @@ User Request (自然語言)
 
 ```
 agent-workflow-framework/
+├── config/
+│   └── routing_map_v1.json      # 機讀分類資料
 ├── docs/
 │   ├── intake_layer/          # 任務分類與信心評分
-│   │   ├── routing_map_v1.json      # 機讀分類資料
 │   │   ├── routing_map_analysis.md  # 分類分析
 │   │   └── active_intake_protocol.md # 運作流程
 │   ├── validate_gate/         # QA 驗證閘門（TODO）
@@ -71,7 +72,6 @@ agent-workflow-framework/
 │   ├── router/                # 路由邏輯（TODO）
 │   ├── validate/              # Validate Gate（TODO）
 │   └── release/               # Release Governance（TODO）
-├── config/                    # 配置檔（TODO）
 ├── tests/                     # 測試（TODO）
 └── README.md
 ```

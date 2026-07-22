@@ -375,13 +375,13 @@ class TestCLIFileMode(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test: routing_map_v1.json invariant (docs/ is gitignored)
+# Test: routing_map_v1.json invariant
 # ---------------------------------------------------------------------------
 
 class TestRoutingInvariant(unittest.TestCase):
     def test_routing_map_v1_unchanged(self):
         """Test: routing_map_v1.json checksum is unchanged."""
-        routing_map_path = Path(__file__).parent.parent / "docs" / "intake_layer" / "routing_map_v1.json"
+        routing_map_path = Path(__file__).parent.parent / "config" / "routing_map_v1.json"
         import hashlib
         with open(routing_map_path, "rb") as f:
             actual = hashlib.sha256(f.read()).hexdigest()
