@@ -3,7 +3,7 @@
 ## Repo state
 - This is a spec/framework repo with local Runtime MVP tooling. The clean tracked base is small (`.gitignore`, `README.md`, selected `docs/**`); local/untracked work may include `AGENTS.md`, `docs/agent_context/**`, `docs/framework_roadmap.md`, and `scripts/*.py`.
 - The `src/`, `config/`, and `tests/` tree in `README.md` is planned/TODO, not present code. `docs/validate_gate/` and `docs/release_governance/` are placeholders if present.
-- Treat `docs/intake_layer/routing_map_v1.json` as the machine-readable source of truth for L0-L4 routing. Keep `docs/intake_layer/active_intake_protocol.md`, `docs/intake_layer/routing_map_analysis.md`, and `docs/architecture/architecture_evaluation_summary.md` consistent with it when changing routing/workflow semantics.
+- Treat `config/routing_map_v1.json` as the machine-readable source of truth for L0-L4 routing. Keep `docs/intake_layer/active_intake_protocol.md`, `docs/intake_layer/routing_map_analysis.md`, and `docs/architecture/architecture_evaluation_summary.md` consistent with it when changing routing/workflow semantics.
 - `docs/framework_roadmap.md` is the roadmap/spec reference when present. Current local roadmap status: v0.1-v3.0 completed; Runtime MVP, Self-Pilot, Governance Audit, Runtime Hardening, Runtime Test Polish, and Observability & Monitoring MVP are complete. Next candidates are v3.1 ML/Hybrid Classifier evaluation, external product repo pilot proposal (Human-approved only), optional observability persistence/dashboard (separate scope), and docs sync follow-ups.
 
 ## Workflow rules to preserve
@@ -15,11 +15,11 @@
 - Roadmap refinements are not yet canonical routing rules until reflected in `routing_map_v1.json` and the intake/architecture docs.
 
 ## Validation for changes
-- For doc/spec changes, verify by reading the affected docs plus `docs/intake_layer/routing_map_v1.json` and checking they agree.
-- For JSON edits: `python3 -m json.tool docs/intake_layer/routing_map_v1.json >/dev/null`.
+- For doc/spec changes, verify by reading the affected docs plus `config/routing_map_v1.json` and checking they agree.
+- For JSON edits: `python3 -m json.tool config/routing_map_v1.json >/dev/null`.
 - Runtime MVP validation commands (local `scripts/*.py` tooling):
   ```bash
-  python3 -m json.tool docs/intake_layer/routing_map_v1.json >/dev/null
+  python3 -m json.tool config/routing_map_v1.json >/dev/null
   python3 -m py_compile scripts/intake_classify.py scripts/pool.py scripts/lane_select.py scripts/observability_report.py
   python3 -m unittest discover -s tests -p 'test_*.py'
   python3 scripts/intake_classify.py "fix threshold bug"

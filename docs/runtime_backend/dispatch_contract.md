@@ -119,7 +119,7 @@ Each lane defines the required agent sequence:
 | L3_HighRisk | Architect → Developer → QA | Pre-approval required; Architect must review design before implementation |
 | L4_Releaser | agent-releaser | **Mandatory delegation** — Architect must not execute |
 
-Source: `scripts/lane_select.py` lane definitions + `docs/intake_layer/routing_map_v1.json` routing_agent field.
+Source: `scripts/lane_select.py` lane definitions + `config/routing_map_v1.json` routing_agent field.
 
 ---
 
@@ -166,4 +166,4 @@ AWF Governance Loop
 - `scripts/lane_select.py` — lane selection logic
 - `scripts/continuation_policy.py` — continuation state machine
 - `scripts/orchestrator.py` — bridge between pool and continuation policy
-- `docs/intake_layer/routing_map_v1.json` — L0-L4 routing
+- `config/routing_map_v1.json` — L0-L4 routing

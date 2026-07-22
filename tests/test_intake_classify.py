@@ -26,8 +26,7 @@ import scripts.intake_classify as intake_classify
 
 ROUTING_MAP_PATH = (
     Path(__file__).parent.parent
-    / "docs"
-    / "intake_layer"
+    / "config"
     / "routing_map_v1.json"
 )
 

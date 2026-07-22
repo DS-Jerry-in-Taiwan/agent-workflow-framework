@@ -589,7 +589,7 @@ def _make_valid_l4_decision() -> dict:
         "evidence": {
             "source_files_read": ["scripts/intake_classify.py", "scripts/lane_select.py"],
             "validation_commands": [
-                "python3 -m json.tool docs/intake_layer/routing_map_v1.json",
+                "python3 -m json.tool config/routing_map_v1.json",
                 "python3 -m py_compile scripts/intake_classify.py",
             ],
             "event_refs": ["evt-20260719-002"],
