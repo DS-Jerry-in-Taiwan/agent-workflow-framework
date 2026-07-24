@@ -1,5 +1,8 @@
 # Agent Workflow Framework
 
+> **Current version: v3.8.0** — Input Contract Adapter + Governance Docs + Routing Map Relocation
+> Status: Pre-release (governance docs prepared, tag pending HITL)
+
 Agent 工作流程編排框架 — Intake Layer（任務分類） → Routing（路由） → Validate Gate（品質閘門） → Release Governance（發布治理）。
 
 從 OpenCode Validate Gate 流程的實際開發經驗中萃取，作為可重複使用的 Agent 協作框架。
@@ -78,7 +81,18 @@ agent-workflow-framework/
 
 ## Quick Start
 
-（尚未實作 — 當前為規格定義階段。）
+```bash
+# Validate runtime state
+python3 scripts/intake_classify.py "release prod tag v3.8.0"
+python3 scripts/lane_select.py --sample L4_RELEASE
+python3 scripts/pool.py status
+python3 scripts/observability_report.py --format markdown
+
+# Run tests
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+See `docs/release_governance/governance_rules.md` for release governance details.
 
 ## License
 
