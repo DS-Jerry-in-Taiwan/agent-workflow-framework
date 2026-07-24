@@ -1,0 +1,10 @@
+{
+  "version": "3.8.0",
+  "tag": "v3.8.0",
+  "release_date": "2026-07-24",
+  "description": "v3.8 Contracts — Input contract adapter, governance docs, routing map relocation",
+  "commits_since_last_release": 4,
+  "files_changed": 19,
+  "insertions": 1728,
+  "deletions": 18
+}
